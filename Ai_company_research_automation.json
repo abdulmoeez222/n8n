@@ -1,0 +1,2734 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Extract links from DataForSEO OnPage Links results\nconst links = $input.first().json.tasks[0].result[0].items || [];\n\n// Get top 3 unique internal links (not pointing to homepage)\nconst homepage = $input.first().json.tasks[0].data.target || '';\n\n// Filter for internal links only\nconst baseUrl = homepage.replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '');\n\nconst urls = links\n  .map(l => l.link_to)\n  .filter(\n    (url, index, self) =>\n      url &&\n      !url.includes('#') &&\n      url !== homepage &&\n      url.includes(baseUrl) && // Internal links only\n      self.indexOf(url) === index // Remove duplicates\n  )\n  .slice(0, 3);\n\nconsole.log('🔍 Total links found:', links.length);\nconsole.log('🏠 Homepage:', homepage);\nconsole.log('🌐 Base URL:', baseUrl);\nconsole.log('✅ Filtered URLs count:', urls.length);\nconsole.log('📋 URLs:', JSON.stringify(urls, null, 2));\n\nif (urls.length === 0) {\n  console.log('⚠️ No internal URLs found, returning homepage only');\n  return [{\n    json: {\n      company_url: homepage,\n      page_url: homepage,\n      page_index: 0,\n      company_name: $input.item.json.company_name,\n      description: $input.item.json.description,\n      products_services: $input.item.json.products_services,\n      icp_core: $input.item.json.icp_core,\n      icp_secondary: $input.item.json.icp_secondary,\n      brand_tone: $input.item.json.brand_tone,\n      value_proposition: $input.item.json.value_proposition,\n      industry: $input.item.json.industry,\n      keywords: $input.item.json.keywords,\n      no_additional_pages: true\n    }\n  }];\n}\n\nconsole.log('✨ Returning', urls.length, 'items for scraping');\n\nreturn urls.map((url, index) => ({\n  json: {\n    company_url: homepage,\n    page_url: url,\n    page_index: index + 1,\n    company_name: $input.item.json.company_name,\n    description: $input.item.json.description,\n    products_services: $input.item.json.products_services,\n    icp_core: $input.item.json.icp_core,\n    icp_secondary: $input.item.json.icp_secondary,\n    brand_tone: $input.item.json.brand_tone,\n    value_proposition: $input.item.json.value_proposition,\n    industry: $input.item.json.industry,\n    keywords: $input.item.json.keywords\n  }\n}));"
+      },
+      "id": "326b0113-24f6-4568-86df-f3f9e3b7d306",
+      "name": "Extract Top 3 URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3568,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all merged input items\nconst allItems = $input.all();\n\n// Create a map to merge pages by URL (avoid duplicates from Merge node)\nconst pagesMap = {};\n\nfor (const item of allItems) {\n  const j = item.json;\n  const url = j.page_url || 'unknown';\n\n  // If page already added, skip duplicate\n  if (!pagesMap[url]) {\n    pagesMap[url] = {\n      company_url: j.company_url || '',\n      url: j.page_url || '',\n      content: j.page_content || '',\n      success: j.scrape_success || false,\n      error: j.error || ''\n    };\n  }\n}\n\n// Convert to array\nconst uniquePages = Object.values(pagesMap);\n\n// Extract metadata from the first input (usually consistent across all)\nconst base = allItems[0]?.json || {};\n\nreturn [\n  {\n    json: {\n      company_url: $('Store Valid URL').first().json.company_url || '',\n      company_name_initial: $('Store Extracted Data1').first().json.company_name_initial || '',\n      description_initial: $('Store Extracted Data1').first().json.description_initial || '',\n      scraped_urls: uniquePages.map(p => p.url),\n      pages_scraped: uniquePages.length,\n      pages: uniquePages,\n      message: `✅ Successfully scraped ${uniquePages.length} unique pages for the company. Ready for detailed AI analysis.`\n    }\n  }\n];\n"
+      },
+      "id": "85fb5dda-d00b-4d00-9932-f344b7f1d5d4",
+      "name": "Combine Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2672,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx1",
+              "name": "context",
+              "value": "={{ $json.pages[0].content }}",
+              "type": "string"
+            },
+            {
+              "id": "ctx2",
+              "name": "scraped_urls",
+              "value": "={{ $json.scraped_urls }}",
+              "type": "array"
+            },
+            {
+              "id": "ctx3",
+              "name": "pages_scraped",
+              "value": "={{ $json.pages_scraped }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "51971d92-2262-41ec-95be-c8e1f7e67004",
+      "name": "Store Context Variable",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2448,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiResponse = $input.first().json.message.content;\n\n// Utility: safely escape regex special characters\nfunction escapeRegex(str) {\n  return (str || '').replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n}\n\n// Safe extraction function\nfunction extractSection(text, sectionName) {\n  if (!sectionName) return ''; // Avoid empty patterns\n  const safeSection = escapeRegex(sectionName);\n  \n  // Build regex carefully; prevent \"nothing to repeat\" by anchoring pattern\n  const pattern = `${safeSection}[)\\\\s:\\\\*\\\\-]*([\\\\s\\\\S]*?)(?=\\\\n\\\\d+\\\\)|\\\\n[A-Z]|$)`;\n  const regex = new RegExp(pattern, 'i');\n  \n  const match = text.match(regex);\n  return match ? match[1].trim() : '';\n}\n\n// Extraction logic (use exact section headers)\nconst company_name = extractSection(aiResponse, '1) **Company Name**');\nconst description = extractSection(aiResponse, '2) **Detailed Description**');\nconst products_services = extractSection(aiResponse, '3) **Products & Services**');\nconst icp_core = extractSection(aiResponse, 'Core ICP');\nconst icp_secondary = extractSection(aiResponse, 'Secondary ICP');\nconst brand_tone = extractSection(aiResponse, '5) **Tone & Style**');\nconst value_proposition = extractSection(aiResponse, '6) **Value Proposition**');\nconst industry = extractSection(aiResponse, '7) **Industry**');\n\n// Extract keywords (bullets, commas, or newlines)\nfunction extractKeywords(text) {\n  const keywordsSection = extractSection(text, '8) **Search Keywords**');\n  const keywords = keywordsSection\n    .split(/[,\\n]/)\n    .map(k => k.trim().replace(/^[-•*]\\s*/, ''))\n    .filter(k => k.length > 0);\n  return keywords.slice(0, 10);\n}\n\nreturn {\n  json: {\n    company_url: $('Store Extracted Data1').first().json.company_url,\n    company_name,\n    description,\n    products_services,\n    icp_core,\n    icp_secondary,\n    brand_tone,\n    value_proposition,\n    industry,\n    keywords: extractKeywords(aiResponse),\n    ai_research_full: aiResponse,\n    step: 'initial_research_complete'\n  }\n};\n"
+      },
+      "id": "b52b1eaf-1f5d-4491-b2aa-d01d4fd17fee",
+      "name": "Parse AI Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4912,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "company_name",
+              "value": "={{ $json.company_name }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "description",
+              "value": "={{ $json.description }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "products_services",
+              "value": "={{ $json.products_services }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "icp_core",
+              "value": "={{ $json.icp_core }}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "icp_secondary",
+              "value": "={{ $json.icp_secondary }}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "brand_tone",
+              "value": "={{ $json.brand_tone }}",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "value_proposition",
+              "value": "={{ $json.value_proposition }}",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "industry",
+              "value": "={{ $json.industry }}",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "keywords",
+              "value": "={{ $json.keywords }}",
+              "type": "array"
+            },
+            {
+              "id": "a10",
+              "name": "message",
+              "value": "=Initial research completed for {{ $json.company_name }}. Now searching for additional pages... ",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8218fc10-ef59-4d45-ac57-10eb95d9e48c",
+      "name": "Store Research Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4688,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"model\": \"gpt-4o-mini\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 1500,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a brand communication expert who analyzes brand tone and communication style.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Analyze the brand's tone and communication style from the following context.\\n\\nProvide:\\n1. Overall brand tone (professional, casual, friendly, authoritative, etc.)\\n2. Communication style characteristics\\n3. Specific quotes or examples from the website that demonstrate this tone\\n4. Voice characteristics (active/passive, formal/informal, technical/simple)\\n\\nContext:\\n\" + $json.context + \"\\n\\nFormat your response in clear sections with specific examples.\"\n    }\n  ]\n}) }}\n",
+        "options": {}
+      },
+      "id": "9f76bbe9-3b5e-457c-9e8b-21998a66dc0d",
+      "name": "AI Agent 7 - Brand Tone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2224,
+        -768
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $credentials.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"gpt-4o\",\n  temperature: 0.4,\n  max_tokens: 1500,\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a competitive intelligence analyst who identifies and analyzes market competitors.\"\n    },\n    {\n      role: \"user\",\n      content:\n        \"Identify the top 3 competitors for the following company:\\n\\n\" +\n        \"Company Name: \" + $node[\"Parse AI Research\"].json.company_name + \"\\n\" +\n        \"Industry: \" + $node[\"Parse AI Research\"].json.industry + \"\\n\" +\n        \"Products/Services: \" + $node[\"Parse AI Research\"].json.products_services + \"\\n\" +\n        \"Target ICP: \" + $node[\"Parse AI Research\"].json.icp_core + \"\\n\\n\" +\n        \"For each competitor provide:\\n1. Company name\\n2. Website URL\\n3. Brief description (2-3 sentences)\\n4. Key products/services\\n5. How they compete with \" + $node[\"Parse AI Research\"].json.company_name + \"\\n\\n\" +\n        \"Format as:\\n**Competitor 1: [Name]**\\nWebsite: [URL]\\nDescription: [desc]\\nProducts: [products]\\nCompetitive Edge: [how they compete]\\n\\n[Repeat for competitors 2 and 3]\"\n    }\n  ]\n}) }}\n",
+        "options": {}
+      },
+      "id": "52c13d39-0fbb-40c0-a543-498a4cd369f5",
+      "name": "AI Agent 15-17 - Competitors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2000,
+        -768
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse competitor research\nconst competitorResponse = $input.item.json.choices[0].message.content;\n\n// Extract individual competitors\nconst competitorBlocks = competitorResponse.split(/\\*\\*Competitor \\d+:/).slice(1);\n\nconst competitors = competitorBlocks.slice(0, 3).map((block, index) => {\n  const nameMatch = block.match(/^\\s*([^\\*\\n]+)/);\n  const websiteMatch = block.match(/Website:\\s*([^\\n]+)/i);\n  const descMatch = block.match(/Description:\\s*([^\\n]+(?:\\n(?!\\w+:)[^\\n]+)*)/i);\n  const productsMatch = block.match(/Products:\\s*([^\\n]+(?:\\n(?!\\w+:)[^\\n]+)*)/i);\n  \n  return {\n    name: nameMatch ? nameMatch[1].trim() : `Competitor ${index + 1}`,\n    website: websiteMatch ? websiteMatch[1].trim() : '',\n    description: descMatch ? descMatch[1].trim() : '',\n    products: productsMatch ? productsMatch[1].trim() : ''\n  };\n});\n\nreturn {\n  json: {\n    ...($input.item.json),\n    competitors: competitors,\n    competitor_1_name: competitors[0]?.name || '',\n    competitor_1_website: competitors[0]?.website || '',\n    competitor_2_name: competitors[1]?.name || '',\n    competitor_2_website: competitors[1]?.website || '',\n    competitor_3_name: competitors[2]?.name || '',\n    competitor_3_website: competitors[2]?.website || '',\n    competitors_full_report: competitorResponse\n  }\n};"
+      },
+      "id": "94f95b47-60dc-4e86-85ec-1ec02613c827",
+      "name": "Parse Competitors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "comp1",
+              "name": "competitors",
+              "value": "={{ $json.competitors }}",
+              "type": "array"
+            },
+            {
+              "id": "comp2",
+              "name": "competitors_report",
+              "value": "={{ $json.competitors_full_report }}",
+              "type": "string"
+            },
+            {
+              "id": "comp3",
+              "name": "message",
+              "value": "=Found competitors:\n1. {{ $json.competitor_1_name }}\n2. {{ $json.competitor_2_name }}\n3. {{ $json.competitor_3_name }}\n\nAre these competitors accurate? Reply 'yes' to continue or provide corrections.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "37a2be65-911b-45da-bb70-f7d2325cd102",
+      "name": "Store Competitors & Ask Validation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1552,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.chatInput.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "yes"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "794c1c54-d315-4ceb-be48-a8de0589e15d",
+      "name": "Competitors Validated?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ {\n  \"message\": \"Please provide corrections for the competitors or confirm with 'yes':\"\n} }}",
+        "options": {}
+      },
+      "id": "e8337a6e-4f01-4b10-9f35-5934998d204b",
+      "name": "Ask for Corrections",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1104,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Competitor Analysis Report"
+      },
+      "id": "ce0ac002-7156-4ce4-a415-dd71e0d09ffb",
+      "name": "Create Competitor Analysis Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $credentials.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ \n  JSON.stringify({\n    model: \"gpt-4o-mini\",\n    temperature: 0.4,\n    max_tokens: 2000,\n    messages: [\n      {\n        role: \"system\",\n        content: \"You are a marketing expert specializing in target audience analysis and market segmentation.\"\n      },\n      {\n        role: \"user\",\n        content:\n          \"Role: Marketing Expert\\n\" +\n          \"Task: Identify and analyze the target audience\\n\\n\" +\n          \"Company: \" + $node[\"Parse AI Research\"].json.company_name + \"\\n\" +\n          \"Industry: \" + $node[\"Parse AI Research\"].json.industry + \"\\n\" +\n          \"Product/Service: \" + $node[\"Parse AI Research\"].json.products_services + \"\\n\" +\n          \"Value Proposition: \" + $node[\"Parse AI Research\"].json.value_proposition + \"\\n\" +\n          \"Current ICP: \" + $node[\"Parse AI Research\"].json.icp_core + \"\\n\\n\" +\n          \"Provide a detailed target audience analysis including:\\n\\n\" +\n          \"1. **Primary Audience Segments**\\n\" +\n          \"   - Demographics (age, gender, income, education, location)\\n\" +\n          \"   - Psychographics (values, interests, lifestyle)\\n\" +\n          \"   - Behavioral traits (buying habits, brand loyalty)\\n\\n\" +\n          \"2. **Secondary Audience Segments**\\n\" +\n          \"   - Alternative customer groups\\n\" +\n          \"   - Potential expansion markets\\n\\n\" +\n          \"3. **Audience Pain Points**\\n\" +\n          \"   - What problems do they face?\\n\" +\n          \"   - What frustrates them?\\n\" +\n          \"   - What are their goals?\\n\\n\" +\n          \"4. **Audience Motivations**\\n\" +\n          \"   - What drives their purchasing decisions?\\n\" +\n          \"   - What benefits do they seek?\\n\\n\" +\n          \"5. **Where to Reach Them**\\n\" +\n          \"   - Preferred channels (social media, search, email, etc.)\\n\" +\n          \"   - Content preferences\\n\" +\n          \"   - Communication style\\n\\n\" +\n          \"Format output in clear Markdown with headers and bullet points.\"\n      }\n    ]\n  })\n}}\n",
+        "options": {}
+      },
+      "id": "af1dd7d5-26d5-49f3-b19d-e348aeb59833",
+      "name": "AI Agent 22 - Target Audience",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -432,
+        -816
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse target audience and personas\nconst targetAudienceResponse = $('AI Agent 22 - Target Audience').first().json.choices[0].message.content;\nconst personasResponse = $input.first().json.message.content;\n\n// Get previous data\nconst previousData = $('Store Competitors & Ask Validation').item.json;\n\nreturn {\n  json: {\n    ...previousData,\n    target_audience_analysis: targetAudienceResponse,\n    customer_personas: personasResponse,\n    competitor_doc_url: $('Create Competitor Analysis Doc').item.json.documentUrl || $('Create Competitor Analysis Doc').item.json.url\n  }\n};"
+      },
+      "id": "f0f44d9b-eb58-49f1-a864-5b5a824abee9",
+      "name": "Parse Audience & Personas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Company Psychology Report"
+      },
+      "id": "245b7598-20e5-4623-a1aa-276994edacfa",
+      "name": "Create Company Psychology Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Customer Profiles"
+      },
+      "id": "8e07d2f2-af9f-4ce8-b66e-603fc004aa19",
+      "name": "Create Customer Profiles Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "doc1",
+              "name": "competitor_doc_url",
+              "value": "={{ $('Create Competitor Analysis Doc').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "doc2",
+              "name": "psychology_doc_url",
+              "value": "={{ $('Create Company Psychology Doc').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "doc3",
+              "name": "customer_profiles_doc_url",
+              "value": "={{ $json.documentId }}",
+              "type": "string"
+            },
+            {
+              "id": "msg",
+              "name": "message",
+              "value": "Created 3 Google Docs:\n✅ Competitor Analysis\n✅ Company Psychology\n✅ Customer Profiles\n\nContinuing with mission & vision analysis...",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a66ced4c-e6c3-47a9-addd-c7063031946d",
+      "name": "Store Doc URLs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse all responses from this section\nconst missionVision = $('Mission and Vision').first().json.message.content;\nconst valuePropRefined = $('Value Prop Refinement').first().json.message.content;\nconst businessDescription = $('Business Description').first().json.message.content;\nconst coreProblems = $input.first().json.message.content;\n\n// Get previous data\nconst previousData = $('Store Doc URLs').item.json;\n\nreturn {\n  json: {\n    ...previousData,\n    mission_vision: missionVision,\n    value_proposition_refined: valuePropRefined,\n    business_description: businessDescription,\n    core_problems: coreProblems\n  }\n};"
+      },
+      "id": "1176c810-3327-4116-b672-d7233b6a0a33",
+      "name": "Parse Research Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Company Research Report"
+      },
+      "id": "29d9c152-9416-4524-ba49-c0314a68b348",
+      "name": "Create Company Research Report Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        3536,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "doc4",
+              "name": "company_research_doc_url",
+              "value": "={{ $json.documentId }}",
+              "type": "string"
+            },
+            {
+              "id": "msg1",
+              "name": "message",
+              "value": "Company Research Report created! Moving to USP and Customer Journey...",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3294cfea-29bb-4470-87e1-f0a954d94405",
+      "name": "Store Research Doc URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4192,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse USP and Customer Journey\nconst uspResponse = $('USP').first().json.message.content;\nconst customerJourney = $input.first().json.message.content;\n\n// Get previous data\nconst previousData = $('Store Research Doc URL').item.json;\n\nreturn {\n  json: {\n    ...previousData,\n    usp: uspResponse,\n    customer_journey: customerJourney\n  }\n};"
+      },
+      "id": "319a2116-4dda-4e87-bf1a-77588a5e2545",
+      "name": "Parse USP & Journey",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5120,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Company Offering & CX Map"
+      },
+      "id": "5c250334-d3d7-41e7-9c03-b3340db4fc0f",
+      "name": "Create CX Map Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        5344,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Brand Guidelines"
+      },
+      "id": "76cd2973-c23c-492b-9fb7-7817f98343c7",
+      "name": "Create Brand Guidelines Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        6352,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse brand guidelines and product features\nconst brandGuidelines = $('Brand Guidelines').first().json.message.content;\nconst productFeatures = $input.first().json.message.content;\n\nreturn {\n  json: {\n    company_name: $('Parse AI Research').first().json.company_name,\n    company_url: $('Parse AI Research').first().json.company_url,\n    description: $('Parse AI Research').first().json.description,\n    business_description: $('Store Research Doc URL').item.json.business_description,\n    products_services: $('Parse AI Research').first().json.products_services,\n    industry: $('Parse AI Research').first().json.industry,\n    icp_core: $('Parse AI Research').first().json.icp_core,\n    brand_tone: $('Parse AI Research').first().json.brand_tone,\n    value_proposition_refined: $('Value Prop Refinement').first().json.message.content,\n    usp: $('USP').first().json.message.content,\n    competitor_1_name: $('Competitors Validated?').first().json.competitors[0].name,\n    competitor_2_name: $('Competitors Validated?').first().json.competitors[1].name,\n    competitor_3_name: $('Competitors Validated?').first().json.competitors[2].name,\n    brand_guidelines: brandGuidelines,\n    product_features: productFeatures,\n    cx_map_doc_id: $('Create CX Map Doc').first().json.id\n  }\n};\n"
+      },
+      "id": "b9c8cdb7-e1fc-4063-8eb4-067074766aa8",
+      "name": "Parse Final Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7360,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $json.company_name }} - Marketing Offers"
+      },
+      "id": "0893e82a-4706-4150-94df-349ce3eb90a1",
+      "name": "Create Marketing Offers Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        7584,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "driveId": "=",
+        "folderId": "=",
+        "title": "={{ $node[\"Parse AI Research\"].json.company_name }}\n - Brand Context (Master Document)"
+      },
+      "id": "82152dba-0e34-45e3-b051-f0eecfdf08b6",
+      "name": "Create Brand Context Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        8240,
+        -816
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "final1",
+              "name": "cx_map_doc_url",
+              "value": "={{ $('Update CX Map Doc').item.json.documentId }}",
+              "type": "string"
+            },
+            {
+              "id": "final2",
+              "name": "brand_guidelines_doc_url",
+              "value": "={{ $('Create Brand Guidelines Doc').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "final3",
+              "name": "marketing_offers_doc_url",
+              "value": "={{ $('Create Marketing Offers Doc').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "final4",
+              "name": "brand_context_doc_url",
+              "value": "={{ $json.documentId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "78ab4f35-a9c8-4d7e-8f61-ed07c66aba82",
+      "name": "Store Final Doc URLs",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        8896,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create final summary output\nconst allData = $('Store Research Doc URL').item.json;\nconst finalDocs = $input.item.json;\n\nreturn {\n  json: {\n    success: true,\n    company_name: $('Parse AI Research').first().json.company_name,\n    company_url: $('Parse AI Research').first().json.company_url,\n    description: $('Parse AI Research').first().json.description,\n    icp_summary: $('Parse AI Research').first().json.icp_core,\n    competitors: [\n      $('Store Competitors & Ask Validation').first().json.competitors[0].name,\n      $('Store Competitors & Ask Validation').first().json.competitors[1].name,\n      $('Store Competitors & Ask Validation').first().json.competitors[2].name\n    ],\n    value_proposition: $('Value Prop Refinement').first().json.message.content,\n    brand_tone: $('Parse AI Research').first().json.brand_tone,\n    usp: $('USP').first().json.message.content,\n    industry: $('Parse AI Research').first().json.industry,\n    documents_created: {\n      competitor_analysis: $('Create Competitor Analysis Doc').first().json.id,\n      company_psychology: $('Create Company Psychology Doc').first().json.id,\n      customer_profiles: $('Create Customer Profiles Doc').first().json.id,\n      company_research: $('Create Company Research Report Doc').first().json.id,\n      cx_map: $('Create CX Map Doc').first().json.id,\n      brand_guidelines: $('Create Brand Guidelines Doc').first().json.id,\n      marketing_offers: $('Create Marketing Offers Doc').first().json.id,\n      brand_context_master: $('Create Brand Context Doc').first().json.id\n    },\n    message: `✅ Analysis Complete for $('Parse AI Research').first().json.company_name!\\n\\n📊 Generated 8 comprehensive documents:\\n1. Competitor Analysis\\n2. Company Psychology\\n3. Customer Profiles\\n4. Company Research Report\\n5. Company Offering & CX Map\\n6. Brand Guidelines\\n7. Marketing Offers\\n8. Brand Context (Master Doc)\\n\\nAll documents saved to Google Drive!`\n  }\n};"
+      },
+      "id": "9f3ae255-92d0-4eb3-a1d7-b909e1ff89b4",
+      "name": "Generate Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9120,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json }}",
+        "options": {}
+      },
+      "id": "5aa3d5c1-7388-4def-831e-a1868afb65f3",
+      "name": "Output Final Results",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        9344,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.company_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "c6f9f2ac-9445-4dfa-b7c5-713a50baafb6",
+      "name": "Fetch Webpage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -6160,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "preserve-url",
+              "name": "company_url",
+              "value": "={{ $('Store Valid URL').item.json.company_url }}",
+              "type": "string"
+            },
+            {
+              "id": "store-html",
+              "name": "html_content",
+              "value": "={{ $json.data }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "34866c87-9d5e-413e-9dde-7e1566e537d5",
+      "name": "Add URL to HTML Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -5936,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from previous node\nconst html = $input.item.json.html_content || '';\nconst companyUrl = $input.item.json.company_url || '';\n\nconsole.log('Processing URL:', companyUrl);\nconsole.log('HTML length:', html.length);\n\ntry {\n  if (!html || html.length < 100) {\n    return {\n      json: {\n        company_url: companyUrl,\n        extraction_success: false,\n        error: 'No HTML content received or content too short',\n        webpage_content: '',\n        company_name_initial: '',\n        description_initial: ''\n      }\n    };\n  }\n\n  // Extract text content (remove HTML tags)\n  let textContent = html\n    .replace(/<script[^>]*>([\\s\\S]*?)<\\/script>/gi, '')\n    .replace(/<style[^>]*>([\\s\\S]*?)<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  // Extract title\n  const titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\n  const title = titleMatch ? titleMatch[1].trim() : 'Company Website';\n\n  // Extract meta description\n  const descMatch = html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i) ||\n                    html.match(/<meta[^>]*content=[\"']([^\"']+)[\"'][^>]*name=[\"']description[\"']/i);\n  const description = descMatch ? descMatch[1].trim() : '';\n\n  // Limit content length to avoid token limits (keep first 15000 chars)\n  const maxLength = 15000;\n  if (textContent.length > maxLength) {\n    textContent = textContent.substring(0, maxLength) + '...';\n  }\n\n  console.log('Extraction successful!');\n  console.log('Title:', title);\n  console.log('Description:', description.substring(0, 100));\n  console.log('Content length:', textContent.length);\n\n  return {\n    json: {\n      company_url: companyUrl,\n      extraction_success: true,\n      webpage_content: textContent,\n      company_name_initial: title,\n      description_initial: description,\n      error: ''\n    }\n  };\n\n} catch (error) {\n  console.error('Extraction error:', error.message);\n  return {\n    json: {\n      company_url: companyUrl,\n      extraction_success: false,\n      error: `Extraction failed: ${error.message}`,\n      webpage_content: '',\n      company_name_initial: '',\n      description_initial: ''\n    }\n  };\n}"
+      },
+      "id": "78d2289e-9370-49a9-a0f6-e0e5dcb1c66c",
+      "name": "Extract HTML Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5712,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the user's message from the chat trigger\nconst input = $input.first().json.body.website_link;\n\nconsole.log('User input:', input);\n\n// Clean the input\nlet url = input.trim();\n\n// Remove common prefixes\nurl = url.replace(/^(url:|website:|site:)/i, '').trim();\n\n// Auto-add https:// if missing protocol\nif (url && !url.match(/^https?:\\/\\//i)) {\n  url = 'https://' + url;\n}\n\n// Validate URL format\nconst urlPattern = /^https?:\\/\\/[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\\.[a-zA-Z]{2,}(:[0-9]{1,5})?(\\/.*)?$/;\nconst hasValidDomain = url.match(/^https?:\\/\\/[^\\/]+\\.[a-z]{2,}/i);\nconst isValid = urlPattern.test(url) && hasValidDomain !== null;\n\nreturn {\n  json: {\n    url: url,\n    isValid: isValid,\n    originalInput: input\n  }\n};"
+      },
+      "id": "368c720b-590a-4ad5-ae5e-3e42c77aa841",
+      "name": "Validate URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6832,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "6f51b149-94b5-411d-899c-19adb0016653",
+              "leftValue": "={{ $json.isValid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "id": "7a730a9c-f135-45dc-9016-3b6b993b5616",
+      "name": "Is URL Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -6608,
+        -448
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ {\n  \"company_url\": $json.url,\n  \"message\": \"Great! Analyzing \" + $json.url + \"...\",\n  \"step\": \"url_validated\"\n} }}",
+        "options": {}
+      },
+      "id": "5741956d-e379-4d63-be6a-43f6b74ec864",
+      "name": "Store Valid URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -6384,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4e4b5d10-a47e-4674-a992-85fc3f377d90",
+              "name": "company_url",
+              "value": "={{ $json.company_url }}",
+              "type": "string"
+            },
+            {
+              "id": "3010ad19-ea64-4e19-b055-1ecff6f7bb7d",
+              "name": "company_name_initial",
+              "value": "={{ $json.company_name_initial }}",
+              "type": "string"
+            },
+            {
+              "id": "3caa8679-c50d-4266-b8b9-45b0c3933d02",
+              "name": "description_initial",
+              "value": "={{ $json.description_initial }}",
+              "type": "string"
+            },
+            {
+              "id": "273dcb60-b173-4e81-b570-b23d3109255a",
+              "name": "webpage_content",
+              "value": "={{ $json.webpage_content }}",
+              "type": "string"
+            },
+            {
+              "id": "c51c3a18-23fc-4937-9d01-31449007059d",
+              "name": "extraction_success",
+              "value": "={{ $json.extraction_success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "95ac0025-e1b5-41e8-8f47-cd349153bfd3",
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4c344ca3-976b-4124-98f7-a523f58e7be0",
+      "name": "Store Extracted Data1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -5488,
+        -592
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"message\": \"Invalid URL format. Please provide a valid website URL (e.g., example.com or https://example.com)\",\n  \"step\": \"url_retry\"\n}",
+        "options": {}
+      },
+      "id": "28c5220c-4042-44e0-a76b-eebef42c7800",
+      "name": "Invalid URL Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -6384,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an expert business analyst who provides detailed, structured research about companies based on their website content.",
+              "role": "system"
+            },
+            {
+              "content": "=Research and analyze the following website content and provide detailed information.\\n\\nWebsite URL: {{ $json.company_url }}\\n\\nWebpage Content:\\n{{ $json.webpage_content }}\\n\\nInitial Company Name: {{ $json.company_name_initial }}\\nInitial Description: {{ $json.description_initial }}\\n\\nPlease provide the following information in a structured format:\\n\\n1) **Company Name**: The official company name\\n\\n2) **Detailed Description**: A comprehensive description of what the company does (2-3 sentences)\\n\\n3) **Products & Services**: List all products and services offered\\n\\n4) **Target ICP (Ideal Customer Profile)**:\\n   - Core ICP: Primary target customers\\n   - Secondary ICP: Secondary target audience\\n\\n5) **Tone & Style**: Describe the brand's communication tone with specific examples from the website\\n\\n6) **Value Proposition**: What unique value does the company offer?\\n\\n7) **Industry**: The primary industry/sector\\n\\n8) **Search Keywords**: List 5-10 non-branded keywords relevant to their business\\n\\nFormat your response clearly with each section labeled."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -5264,
+        -592
+      ],
+      "id": "2025ea4f-34bc-4334-a247-e0cf6f849c02",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/on_page/links",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([\n  {\n    id: $json.tasks[0].result[0].id\n  }\n]) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3792,
+        -768
+      ],
+      "id": "718bffe8-dedf-4099-9072-e442b30ada38",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "5SwSJgoL6VpRcY7E",
+          "name": "DataforSEO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.dataforseo.com/v3/on_page/tasks_ready",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([\n  {\n    id: $json.tasks[0].id\n  }\n]) }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4240,
+        -592
+      ],
+      "id": "c156b281-d82c-4b72-857f-f1bae40cdb68",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "5SwSJgoL6VpRcY7E",
+          "name": "DataforSEO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "57c7d767-279f-4db0-9917-124dd02226c4",
+              "leftValue": "={{ $json.tasks[0].result_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -4016,
+        -720
+      ],
+      "id": "1714ac05-1098-4f12-aa7b-82f964a17695",
+      "name": "If"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3792,
+        -544
+      ],
+      "id": "2736419a-df4f-45f6-b8a8-b3659669c0b0",
+      "name": "Wait",
+      "webhookId": "a8f00c53-66ff-4f8c-89f9-ac7c1232e4a6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/on_page/task_post",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([\n  {\n    target: $('Parse AI Research').item.json.company_url,\n    max_crawl_pages: 1,\n    enable_javascript: true\n  }\n]) }}\n",
+        "options": {}
+      },
+      "id": "afd53ac2-cefa-42ae-9024-d6221c9faa77",
+      "name": "DataForSeo - Site Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4464,
+        -592
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "5SwSJgoL6VpRcY7E",
+          "name": "DataforSEO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.page_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "94cd6a7e-7d7c-455d-b988-3dc66a6a1eca",
+      "name": "HTTP Request - Scrape Page1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3344,
+        -832
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract clean text from HTML page\nconst item = $input.item.json;\n\n// Detect possible HTML content\nconst html = item.html || item.data || item.body || '';\n\nconsole.log('Processing page:', item.page_url);\nconsole.log('HTML type:', typeof html);\nconsole.log('HTML length:', html ? html.length : 0);\n\ntry {\n  if (!html || typeof html !== 'string' || html.length < 100) {\n    console.log('⚠️ Invalid or too short HTML content');\n    return {\n      json: {\n        ...item,\n        page_content: item.page_content || '',\n        scrape_success: false,\n        error: 'No valid HTML content found or too short',\n      },\n    };\n  }\n\n  // Remove unwanted tags\n  let content = html\n    .replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '')\n    .replace(/<style\\b[^<]*(?:(?!<\\/style>)<[^<]*)*<\\/style>/gi, '')\n    .replace(/<(nav|footer|header|iframe|noscript)[^>]*>[\\s\\S]*?<\\/\\1>/gi, '')\n    .replace(/<!--[\\s\\S]*?-->/g, '')\n    .replace(/<[^>]+>/g, ' ');\n\n  // Decode HTML entities\n  content = content\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/&apos;/g, \"'\");\n\n  // Clean up whitespace\n  const cleanedText = content\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .substring(0, 8000);\n\n  console.log('✅ Extraction done, length:', cleanedText.length);\n\n  return {\n    json: {\n      ...item,\n      page_content: cleanedText,\n      scrape_success: true,\n      error: '',\n    },\n  };\n} catch (err) {\n  console.error('❌ Extraction error:', err.message);\n  return {\n    json: {\n      ...item,\n      page_content: '',\n      scrape_success: false,\n      error: err.message,\n    },\n  };\n}\n"
+      },
+      "id": "87fd4298-d73c-4265-a1f9-40818d6046e2",
+      "name": "Extract Page Content1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3120,
+        -832
+      ],
+      "executeOnce": false
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -2896,
+        -768
+      ],
+      "id": "657bf819-de54-46d9-b61e-e490b742c978",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a market research analyst who creates detailed, realistic customer personas based on target audience data",
+              "role": "system"
+            },
+            {
+              "content": "=Role: Market Research Analyst\\nTask: Create 3 detailed customer personas\\n\\nCompany:{{ $node[\"Parse AI Research\"].json.company_name }}\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n \\n\\nTarget Audience Information:\\n{{ $('AI Agent 22 - Target Audience').item.json.choices[0].message.content }}\\n\\nCreate 3 distinct customer personas. For each persona include:\\n\\n**Persona [Number]: [Name]**\\n\\n**Demographics:**\\n- Age:\\n- Gender:\\n- Location:\\n- Job Title/Role:\\n- Income Level:\\n- Education:\\n\\n**Background:**\\n- Brief personal/professional background (2-3 sentences)\\n\\n**Goals & Objectives:**\\n- What are they trying to achieve?\\n- What does success look like for them?\\n\\n**Challenges & Pain Points:**\\n- What obstacles do they face?\\n- What frustrates them daily?\\n\\n**How {{ $node[\"Parse AI Research\"].json.company_name }}\n Helps:**\\n- Specific benefits they gain\\n- Why they choose this company\\n\\n**Preferred Channels:**\\n- Where they spend time online\\n- How they prefer to communicate\\n\\n**Quote:**\\n- A representative quote that captures their mindset\\n\\n---\\n\\nFormat in Markdown with clear sections for each persona."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        -208,
+        -816
+      ],
+      "id": "23955410-feae-4b7a-affa-d258aac2500d",
+      "name": "Customer Personas",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a business analyst who extracts mission and vision statements from company content",
+              "role": "system"
+            },
+            {
+              "content": "=Extract the company's mission and vision from the following context.\\n\\nCompany:{{ $node[\"Parse AI Research\"].json.company_name }}\n \\n\\nContext:\\n{{ $('Combine Context').item.json.pages[0].content }}\\n\\nProvide:\\n\\n**Mission Statement:**\\n[If found, provide the exact or paraphrased mission. If not found, write \\\"None found\\\" and suggest a mission based on their business]\\n\\n**Vision Statement:**\\n[If found, provide the exact or paraphrased vision. If not found, write \\\"None found\\\" and suggest a vision based on their goals]\\n\\n**Core Values:**\\n[Any explicitly stated or implied values]\\n\\nIf mission/vision are not explicitly stated on the website, clearly indicate \\\"None found\\\" and provide a suggested version based on the company's activities and messaging."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1904,
+        -816
+      ],
+      "id": "8c5cc323-950d-41a3-a183-9491b7549735",
+      "name": "Mission and Vision",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a consumer psychology and marketing expert who crafts compelling value propositions that resonate with target audiences",
+              "role": "system"
+            },
+            {
+              "content": "=Role: Consumer Psychology and Marketing Expert\\nTask: Create a compelling, refined value proposition\\n\\nCompany:{{ $node[\"Parse AI Research\"].json.company_name }}\n\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n\n\\nBrand Tone: {{ $node[\"Parse AI Research\"].json.brand_tone }}\n\\nTarget Audience: {{ $node[\"Parse AI Research\"].json.icp_core }}\n\\nMission/Vision: {{ $json.message.content }}\\n\\nCreate a refined value proposition that:\\n1. Clearly articulates the unique benefit\\n2. Resonates with the target audience's pain points\\n3. Differentiates from competitors\\n4. Aligns with the brand tone\\n5. Is memorable and concise\\n\\nProvide:\\n\\n**Primary Value Proposition** (1-2 sentences):\\n[Main value prop]\\n\\n**Extended Value Proposition** (3-4 sentences):\\n[Detailed explanation]\\n\\n**Key Differentiators:**\\n- [Point 1]\\n- [Point 2]\\n- [Point 3]\\n\\n**Emotional Hook:**\\n[What emotional need does this fulfill?]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        2256,
+        -816
+      ],
+      "id": "c4282d13-ecc8-4f3d-8505-b9f6180408ff",
+      "name": "Value Prop Refinement",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are an expert copywriter who writes concise, impactful business descriptions.",
+              "role": "system"
+            },
+            {
+              "content": "=Role: Professional Copywriter\\nTask: Write a compelling business description\\n\\nCompany: {{ $node[\"Parse AI Research\"].json.company_name }}\n\\nIndustry: {{ $node[\"Parse AI Research\"].json.industry }}\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n\\nValue Proposition: {{ $json.message.content }}\\nTarget Audience: {{ $node[\"Parse AI Research\"].json.icp_core }}\n\\nBrand Tone: {{ $node[\"Parse AI Research\"].json.brand_tone }}\n\\n\\nWrite a concise, impactful business description (3-4 sentences) that:\\n- Clearly explains what the company does\\n- Highlights their unique value\\n- Appeals to their target audience\\n- Matches their brand tone\\n- Is suitable for websites, LinkedIn, or marketing materials\\n\\nProvide only the description, no additional commentary."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        2608,
+        -816
+      ],
+      "id": "c4ebc59b-1205-4ed5-b5bc-00605c7d7422",
+      "name": "Business Description",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a business strategist who identifies core customer problems and pain points.",
+              "role": "system"
+            },
+            {
+              "content": "=Identify the top 3 core problems that {{ $node[\"Parse AI Research\"].json.company_name }}\n solves for their customers.\\n\\nCompany: {{ $node[\"Parse AI Research\"].json.company_name }}\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n\\nBrand Tone: {{ $node[\"Parse AI Research\"].json.brand_tone }}\n\\nTarget Audience: {{ $('AI Agent 22 - Target Audience').item.json.choices[0].message.content }}\n\\nValue Proposition: {{ $('Value Prop Refinement').item.json.message.content }}\\n\\nFor each problem, provide:\\n\\n**Problem [Number]: [Problem Title]**\\n\\n**Description:**\\n[Detailed explanation of the problem - 2-3 sentences]\\n\\n**Impact on Customer:**\\n[How this problem affects them - pain points, frustrations, costs]\\n\\n**How {{ $node[\"Parse AI Research\"].json.company_name }}\n Solves It:**\\n[Specific solution and benefits]\\n\\n**Result/Outcome:**\\n[What customers achieve after solving this problem]\\n\\n---\\n\\nProvide 3 distinct problems in this format."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        2960,
+        -816
+      ],
+      "id": "4da08f78-a312-4b77-bfd4-5489f0a2e371",
+      "name": "Core Problems",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a strategic marketing consultant who develops unique selling propositions that differentiate companies from their competitors.",
+              "role": "system"
+            },
+            {
+              "content": "=Develop a Unique Selling Proposition (USP) for {{ $node[\"Parse AI Research\"].json.company_name }}\n.\\n\\nCompany: {{ $node[\"Parse AI Research\"].json.company_name }}\n\\nValue Proposition: {{ $('Value Prop Refinement').item.json.message.content }}\\nCore Problems Solved: {{ $('Core Problems').item.json.message.content }}\\nCompetitors: {{ $('Store Competitors & Ask Validation').item.json.competitors[0] }}, {{ $('Store Competitors & Ask Validation').item.json.competitors[1] }}, {{ $('Store Competitors & Ask Validation').item.json.competitors[2] }} \\nTarget Audience: {{ $('AI Agent 22 - Target Audience').item.json.choices[0].message.content }}\\n\\nCreate a USP that:\\n1. Clearly differentiates from competitors\\n2. Is specific and memorable\\n3. Addresses customer needs\\n4. Is believable and defensible\\n\\nProvide:\\n\\n**Primary USP** (1 sentence):\\n[Concise, powerful statement]\\n\\n**USP Explanation** (2-3 sentences):\\n[Why this matters and how it's different]\\n\\n**Competitive Differentiation:**\\n[How this sets {{ $node[\"Parse AI Research\"].json.company_name }}\n apart from {{ $('Competitors Validated?').item.json.competitors[0] }}, {{ $('Competitors Validated?').item.json.competitors[1] }}, and {{ $('Competitors Validated?').item.json.competitors[2] }}]\\n\\n**Proof Points:**\\n- [Evidence or feature that supports USP]\\n- [Another supporting point]\\n- [Another supporting point]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        4416,
+        -816
+      ],
+      "id": "bb35780b-c5e0-4460-9329-88a615585b09",
+      "name": "USP",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a Customer Experience (CX) Specialist who designs optimal customer journeys",
+              "role": "system"
+            },
+            {
+              "content": "=Role: CX Specialist\\nTask: Design an optimal customer journey\\n\\nCompany: {{ $node[\"Parse AI Research\"].json.company_name }}\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n \\nTarget Audience: {{ $('AI Agent 22 - Target Audience').item.json.choices[0].message.content }}\\nUSP: {{ $json.message.content }}\\n\\nMap the customer journey through these stages:\\n\\n**1. AWARENESS**\\n- How do customers first discover {{ $node[\"Parse AI Research\"].json.company_name }}\n?\\n- Key touchpoints (channels, content, ads)\\n- Customer mindset and questions\\n\\n**2. CONSIDERATION**\\n- What information do they seek?\\n- How do they evaluate options?\\n- Key decision factors\\n- Potential objections\\n\\n**3. DECISION**\\n- What triggers the purchase decision?\\n- Final evaluation criteria\\n- Conversion points\\n\\n**4. ENGAGEMENT**\\n- Onboarding experience\\n- Initial product/service usage\\n- Support and guidance\\n\\n**5. POST-PURCHASE**\\n- Customer success activities\\n- Retention strategies\\n- Upsell/cross-sell opportunities\\n- Advocacy and referrals\\n\\nFor each stage, include:\\n- Customer goals\\n- Key touchpoints\\n- Company actions\\n- Success metrics\\n\\nFormat in clear Markdown sections"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        4768,
+        -816
+      ],
+      "id": "58648c7e-a797-4dfd-b2a4-2635cf830f47",
+      "name": "Customer Journey",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a brand designer who extracts brand guidelines and visual identity information from websites",
+              "role": "system"
+            },
+            {
+              "content": "=Extract brand guidelines and visual identity elements for {{ $node[\"Parse AI Research\"].json.company_name }}\n.\\n\\nWebsite: {{ $node[\"Parse AI Research\"].json.company_url }}\n\\nContext: {{ $node[\"Combine Context\"].json.pages[0].content }}\n\\n\\nExtract or infer:\\n\\n**Logo:**\\n- Logo URL (if found in the website)\\n- Logo style description\\n\\n**Colors:**\\n- Primary colors (hex codes if identifiable)\\n- Secondary colors\\n- Color palette description\\n\\n**Typography:**\\n- Primary fonts used\\n- Font style (serif, sans-serif, etc.)\\n- Typography hierarchy\\n\\n**Visual Style:**\\n- Art style (minimalist, bold, corporate, playful, etc.)\\n- Image style (photography, illustrations, 3D, etc.)\\n- Overall aesthetic\\n\\n**Tone:**\\n- Visual tone (professional, friendly, modern, classic, etc.)\\n\\n**Design Elements:**\\n- Common shapes, patterns, or motifs\\n- Layout style\\n\\nIf specific elements aren't found, describe what you observe from the general website design. Provide hex codes if colors are identifiable."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        6000,
+        -816
+      ],
+      "id": "3ea34b6d-49d1-494e-82b9-c99f6cd47c04",
+      "name": "Brand Guidelines",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a product analyst who identifies and explains key product features and their benefits.",
+              "role": "system"
+            },
+            {
+              "content": "=Role: Product Analyst\\nTask: Identify 3 core product features\\n\\nCompany: {{ $node[\"Parse AI Research\"].json.company_name }}\n\\nProducts/Services: {{ $node[\"Parse AI Research\"].json.products_services }}\n\\nValue Proposition: {{ $node[\"Value Prop Refinement\"].json.message.content }}\\nCore Problems: \\n\\nIdentify the 3 most important product/service features.\\n\\nFor each feature provide:\\n\\n**Feature [Number]: [Feature Name]**\\n\\n**Description:**\\n[What it is and how it works - 2-3 sentences]\\n\\n**Benefits:**\\n- [Primary benefit]\\n- [Secondary benefit]\\n- [Tertiary benefit]\\n\\n**Target User:**\\n[Who benefits most from this feature]\\n\\n**Differentiation:**\\n[How this feature stands out from competitors]\\n\\n**Use Case:**\\n[Real-world scenario where this feature shines]\\n\\n---\\n\\nFormat clearly with 3 distinct features"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        7008,
+        -816
+      ],
+      "id": "9d08676a-ffbb-49b9-9fcf-7d706b196309",
+      "name": "Product Features",
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "AI CMO Agent",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Website URL",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        -7056,
+        -1056
+      ],
+      "id": "10c84aad-1c60-4cb6-83b4-5a06ea09e687",
+      "name": "On form submission",
+      "webhookId": "70d9b62e-305f-4edf-bf90-665ac4bfb833",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "d7a94f07-42aa-4083-9098-7b186151ae2b",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -7056,
+        -448
+      ],
+      "id": "23aa426c-e74b-4006-9393-62a2465f61f2",
+      "name": "Webhook",
+      "webhookId": "d7a94f07-42aa-4083-9098-7b186151ae2b"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.clean_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        -816
+      ],
+      "id": "65b39246-dfaa-4aab-913c-9af6f90336c8",
+      "name": "Update Competitor Analysis Docs",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $('Create Company Psychology Doc').item.json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.plain_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -816
+      ],
+      "id": "34cf2933-6f70-46ee-9d7e-7f0ad8336524",
+      "name": "Update Create Company Psychology Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.plain_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -816
+      ],
+      "id": "236e0ab6-9066-4224-a37c-e6a9c058dc9e",
+      "name": "Update Create Customer Profiles Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.mission_vision_plain }}\n\n{{ $json.value_proposition_refined_plain }}\n\n{{ $json.business_description_plain }}\n\n{{ $json.core_problems_plain }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        3968,
+        -816
+      ],
+      "id": "a13dd0a8-094f-47dc-8e83-3df5b7bf868d",
+      "name": "Update Company Research Report Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.usp_plain }}\n\n{{ $json.customer_journey_plain }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        5776,
+        -816
+      ],
+      "id": "92483f9f-3b45-493d-ad56-9990371b2a6d",
+      "name": "Update CX Map Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.plain_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        6784,
+        -816
+      ],
+      "id": "ab722a9c-68bd-4958-889a-9e9b97b24e1a",
+      "name": "Update Brand Guidelines Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.plain_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        8016,
+        -816
+      ],
+      "id": "2768913c-fb9e-4142-a589-557de06a767e",
+      "name": "Update Marketing Offers Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $json.plain_text }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        8672,
+        -816
+      ],
+      "id": "7f783a21-3235-4208-96f9-86be61248b7c",
+      "name": "Update Brand Context Doc",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "YK9xwsEIbfmshxGr",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').first().json.body.recipient_email }}",
+        "subject": "CMO Agent Report",
+        "message": "=<html>\n  <body style=\"font-family: Arial, sans-serif; color: #333; line-height: 1.6; background-color: #f9f9f9; padding: 20px;\">\n    <div style=\"max-width: 650px; background: #fff; margin: 0 auto; padding: 25px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);\">\n      \n      <h2 style=\"color: #2c3e50;\">✅ Analysis Complete for {{ $json.company_name }}</h2>\n      \n      <p>Hi there,</p>\n\n      <p>\n        Your company analysis for <strong>{{ $json.company_name }}</strong> is now complete!<br>\n        We’ve generated <strong>8 comprehensive documents</strong> covering key areas such as competitors, brand tone, customer profiles, and marketing strategy.\n      </p>\n\n      <h3 style=\"color: #2c3e50;\">📊 Documents Created:</h3>\n      <ol>\n        <li>Competitor Analysis</li>\n        <li>Company Psychology</li>\n        <li>Customer Profiles</li>\n        <li>Company Research Report</li>\n        <li>CX Map</li>\n        <li>Brand Guidelines</li>\n        <li>Marketing Offers</li>\n        <li>Brand Context (Master Doc)</li>\n      </ol>\n\n      <h3 style=\"color: #2c3e50;\">🔗 Google Drive Links:</h3>\n      <ul>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.competitor_analysis }}\" target=\"_blank\">Competitor Analysis</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.company_psychology }}\" target=\"_blank\">Company Psychology</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.customer_profiles }}\" target=\"_blank\">Customer Profiles</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.company_research }}\" target=\"_blank\">Company Research Report</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.cx_map }}\" target=\"_blank\">CX Map</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.brand_guidelines }}\" target=\"_blank\">Brand Guidelines</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.marketing_offers }}\" target=\"_blank\">Marketing Offers</a></li>\n        <li><a href=\"https://drive.google.com/file/d/{{ $json.documents_created.brand_context_master }}\" target=\"_blank\">Brand Context (Master Doc)</a></li>\n      </ul>\n\n      <p style=\"margin-top: 30px;\">Thank you,</p>\n      <p><strong>— AI Research Automation System 🤖</strong></p>\n    </div>\n  </body>\n</html>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        9568,
+        -816
+      ],
+      "id": "2043120b-50f7-4211-8ffc-e72cbfa6916c",
+      "name": "Send a message",
+      "webhookId": "f9ec42c8-6cf5-46f0-a99f-1ef5ce5e4aa5",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "5HiwL6s4QO4OXwdt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get Markdown content from the \"Brand Guidelines\" node\nconst markdown = $('Brand Guidelines').first().json.message.content;\n\n// Markdown → plain text converter\nfunction mdToText(md) {\n  if (!md) return '';\n  return md\n    .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n    .replace(/`([^`]*)`/g, '$1')           // remove inline code\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert links to text\n    .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n    .replace(/^> /gm, '')                  // remove blockquotes\n    .replace(/^#+ /gm, '')                 // remove headings\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n    .replace(/\\n{2,}/g, '\\n')              // normalize spacing\n    .trim();\n}\n\n// Convert to plain text\nconst plain = mdToText(markdown);\n\n// Return for next node\nreturn { json: { plain_text: plain, id: $input.first().json.id } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6560,
+        -816
+      ],
+      "id": "631f676f-7c02-4f73-a669-2f487c164c2f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get Markdown content from the \"Parse Final Data\" node\nconst markdown = $('Parse Final Data').first().json.products_services;\n\n// Markdown → plain text converter\nfunction mdToText(md) {\n  if (!md) return '';\n  return md\n    .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n    .replace(/`([^`]*)`/g, '$1')           // remove inline code\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert links to text\n    .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n    .replace(/^> /gm, '')                  // remove blockquotes\n    .replace(/^#+ /gm, '')                 // remove headings\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n    .replace(/\\n{2,}/g, '\\n')              // normalize spacing\n    .trim();\n}\n\n// Convert to plain text\nconst plain = mdToText(markdown);\n\n// Return for next node\nreturn { json: { plain_text: plain, id: $input.first().json.id } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7792,
+        -816
+      ],
+      "id": "6cea2058-f1b5-49b6-b85f-039bcd970f43",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get Markdown content from \"Store Context Variable\" node\nconst markdown = $('Store Context Variable').first().json.context;\n\n// Markdown → Plain text converter\nfunction mdToText(md) {\n  if (!md) return '';\n  return md\n    .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n    .replace(/`([^`]*)`/g, '$1')           // remove inline code\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert links to text\n    .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n    .replace(/^> /gm, '')                  // remove blockquotes\n    .replace(/^#+ /gm, '')                 // remove headings\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n    .replace(/\\n{2,}/g, '\\n')              // normalize newlines\n    .trim();\n}\n\n// Convert Markdown to plain text\nconst plain = mdToText(markdown);\n\n// Return as JSON\nreturn { json: { plain_text: plain, id: $input.first().json.id } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8448,
+        -816
+      ],
+      "id": "98d36ca8-d2d2-4728-94fb-0d79b8dca728",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get markdown text from the \"Parse USP & Journey\" node\nconst usp = $('Parse USP & Journey').first().json.usp;\nconst customerJourney = $('Parse USP & Journey').first().json.customer_journey;\n\n// Markdown → plain text converter\nfunction mdToText(md) {\n  if (!md) return '';\n  return md\n    .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n    .replace(/`([^`]*)`/g, '$1')           // remove inline code marks\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert markdown links to text\n    .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n    .replace(/^> /gm, '')                  // remove blockquotes\n    .replace(/^#+ /gm, '')                 // remove headings\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n    .replace(/\\n{2,}/g, '\\n')              // normalize spacing\n    .trim();\n}\n\n// Convert both Markdown fields\nconst plain1 = mdToText(usp);\nconst plain2 = mdToText(customerJourney);\n\n// Return clean text versions\nreturn {\n  json: {\n    usp_plain: plain1,\n    customer_journey_plain: plain2,\n    id: $input.first().json.id\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5552,
+        -816
+      ],
+      "id": "a5598321-a258-4189-b0f9-cfe43abb7023",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get Markdown fields from \"Parse Research Data\"\nconst missionVision = $('Parse Research Data').first().json.mission_vision;\nconst valueProp = $('Parse Research Data').first().json.value_proposition_refined;\nconst businessDesc = $('Parse Research Data').first().json.business_description;\nconst coreProblems = $('Parse Research Data').first().json.core_problems;\n\n// Simple markdown-to-plain-text function\nfunction mdToText(md) {\n  if (!md) return '';\n  return md\n    .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n    .replace(/`([^`]*)`/g, '$1')           // remove inline code marks\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert markdown links to text\n    .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n    .replace(/^> /gm, '')                  // remove blockquotes\n    .replace(/^#+ /gm, '')                 // remove headings\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n    .replace(/\\n{2,}/g, '\\n')              // normalize extra spacing\n    .trim();\n}\n\n// Convert all\nconst plain1 = mdToText(missionVision);\nconst plain2 = mdToText(valueProp);\nconst plain3 = mdToText(businessDesc);\nconst plain4 = mdToText(coreProblems);\n\n// Return all as JSON\nreturn {\n  json: {\n    mission_vision_plain: plain1,\n    value_proposition_refined_plain: plain2,\n    business_description_plain: plain3,\n    core_problems_plain: plain4,\n    id: $input.first().json.id\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3744,
+        -816
+      ],
+      "id": "506b9804-49d7-41cb-a306-11ee8390b175",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const md = $('Parse Audience & Personas').first().json.customer_personas;\n\nconst plain = md\n  .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n  .replace(/`([^`]*)`/g, '$1')           // remove inline code marks\n  .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // convert markdown links to text\n  .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n  .replace(/^> /gm, '')                  // remove blockquotes\n  .replace(/^#+ /gm, '')                 // remove headings\n  .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list bullets\n  .replace(/\\n{2,}/g, '\\n')              // normalize extra spacing\n  .trim();\n\nreturn {\n  json: {\n    plain_text: plain,\n    id: $input.first().json.id\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        -816
+      ],
+      "id": "9867c086-a4fc-4959-ba5b-45f1fa6b3afb",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const md = $('Parse Audience & Personas').first().json.target_audience_analysis;\n\nconst plain = md\n  .replace(/```[\\s\\S]*?```/g, '')        // remove code blocks\n  .replace(/`([^`]*)`/g, '$1')           // remove inline code marks\n  .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1') // remove markdown links\n  .replace(/(\\*\\*|__|\\*|_)/g, '')        // remove bold/italic\n  .replace(/^> /gm, '')                  // remove blockquotes\n  .replace(/^#+ /gm, '')                 // remove headings\n  .replace(/^[\\*\\-\\+]\\s+/gm, '')         // remove list markers\n  .replace(/\\n{2,}/g, '\\n')              // normalize spacing\n  .trim();\n\nreturn { json: { plain_text: plain, id: $input.first().json.id } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -816
+      ],
+      "id": "9d796e97-65c3-476d-b205-07bd72016556",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let md = $('Competitors Validated?').first().json.competitors_report;\n\n  let plain = md\n    .replace(/```[\\s\\S]*?```/g, '')\n    .replace(/`([^`]*)`/g, '$1')\n    .replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')\n    .replace(/(\\*\\*|__|\\*|_)/g, '')\n    .replace(/^> /gm, '')\n    .replace(/^#+ /gm, '')\n    .replace(/^[\\*\\-\\+]\\s+/gm, '')\n    .replace(/\\n{2,}/g, '\\n')\n    .trim();\n\n  item.json.clean_text = plain;\n  return item;\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        -816
+      ],
+      "id": "d674778e-d19b-476e-a057-d191f63c5686",
+      "name": "Code in JavaScript7"
+    }
+  ],
+  "connections": {
+    "Extract Top 3 URLs": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Scrape Page1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine Context": {
+      "main": [
+        [
+          {
+            "node": "Store Context Variable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Context Variable": {
+      "main": [
+        [
+          {
+            "node": "AI Agent 7 - Brand Tone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Research": {
+      "main": [
+        [
+          {
+            "node": "Store Research Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Research Data": {
+      "main": [
+        [
+          {
+            "node": "DataForSeo - Site Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 7 - Brand Tone": {
+      "main": [
+        [
+          {
+            "node": "AI Agent 15-17 - Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 15-17 - Competitors": {
+      "main": [
+        [
+          {
+            "node": "Parse Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Competitors": {
+      "main": [
+        [
+          {
+            "node": "Store Competitors & Ask Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Competitors & Ask Validation": {
+      "main": [
+        [
+          {
+            "node": "Competitors Validated?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitors Validated?": {
+      "main": [
+        [
+          {
+            "node": "Create Competitor Analysis Doc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask for Corrections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask for Corrections": {
+      "main": [
+        [
+          {
+            "node": "Competitors Validated?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Competitor Analysis Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 22 - Target Audience": {
+      "main": [
+        [
+          {
+            "node": "Customer Personas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Audience & Personas": {
+      "main": [
+        [
+          {
+            "node": "Create Company Psychology Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Company Psychology Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Customer Profiles Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Doc URLs": {
+      "main": [
+        [
+          {
+            "node": "Mission and Vision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Research Data": {
+      "main": [
+        [
+          {
+            "node": "Create Company Research Report Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Company Research Report Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Research Doc URL": {
+      "main": [
+        [
+          {
+            "node": "USP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse USP & Journey": {
+      "main": [
+        [
+          {
+            "node": "Create CX Map Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CX Map Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Brand Guidelines Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Final Data": {
+      "main": [
+        [
+          {
+            "node": "Create Marketing Offers Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Marketing Offers Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Brand Context Doc": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Final Doc URLs": {
+      "main": [
+        [
+          {
+            "node": "Generate Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Final Summary": {
+      "main": [
+        [
+          {
+            "node": "Output Final Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output Final Results": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Webpage": {
+      "main": [
+        [
+          {
+            "node": "Add URL to HTML Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add URL to HTML Data": {
+      "main": [
+        [
+          {
+            "node": "Extract HTML Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract HTML Content": {
+      "main": [
+        [
+          {
+            "node": "Store Extracted Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate URL": {
+      "main": [
+        [
+          {
+            "node": "Is URL Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is URL Valid?": {
+      "main": [
+        [
+          {
+            "node": "Store Valid URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Invalid URL Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Valid URL": {
+      "main": [
+        [
+          {
+            "node": "Fetch Webpage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Extracted Data1": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Extract Top 3 URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataForSeo - Site Search": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Scrape Page1": {
+      "main": [
+        [
+          {
+            "node": "Extract Page Content1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Page Content1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Combine Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer Personas": {
+      "main": [
+        [
+          {
+            "node": "Parse Audience & Personas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mission and Vision": {
+      "main": [
+        [
+          {
+            "node": "Value Prop Refinement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Value Prop Refinement": {
+      "main": [
+        [
+          {
+            "node": "Business Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Description": {
+      "main": [
+        [
+          {
+            "node": "Core Problems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Core Problems": {
+      "main": [
+        [
+          {
+            "node": "Parse Research Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "USP": {
+      "main": [
+        [
+          {
+            "node": "Customer Journey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer Journey": {
+      "main": [
+        [
+          {
+            "node": "Parse USP & Journey",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand Guidelines": {
+      "main": [
+        [
+          {
+            "node": "Create Brand Guidelines Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Product Features": {
+      "main": [
+        [
+          {
+            "node": "Parse Final Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        []
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Competitor Analysis Docs": {
+      "main": [
+        [
+          {
+            "node": "AI Agent 22 - Target Audience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Create Company Psychology Doc": {
+      "main": [
+        [
+          {
+            "node": "Create Customer Profiles Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Create Customer Profiles Doc": {
+      "main": [
+        [
+          {
+            "node": "Store Doc URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Company Research Report Doc": {
+      "main": [
+        [
+          {
+            "node": "Store Research Doc URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update CX Map Doc": {
+      "main": [
+        [
+          {
+            "node": "Brand Guidelines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Brand Guidelines Doc": {
+      "main": [
+        [
+          {
+            "node": "Product Features",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Marketing Offers Doc": {
+      "main": [
+        [
+          {
+            "node": "Create Brand Context Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Brand Context Doc": {
+      "main": [
+        [
+          {
+            "node": "Store Final Doc URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Update Brand Guidelines Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Update Marketing Offers Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Update Brand Context Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Update CX Map Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Update Company Research Report Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Update Create Customer Profiles Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Update Create Company Psychology Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "Update Competitor Analysis Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "On form submission": [
+      {
+        "Website URL": "https://www.anthropic.com/",
+        "Email": "haider.aie",
+        "submittedAt": "2025-10-29T16:23:35.237+01:00",
+        "formMode": "production"
+      }
+    ],
+    "Webhook": [
+      {
+        "headers": {
+          "host": "snapwise.app.n8n.cloud",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+          "content-length": "207",
+          "accept": "application/json, text/plain, */*",
+          "accept-encoding": "gzip, br",
+          "accept-language": "en-US,en;q=0.9,am-ET;q=0.8,am;q=0.7",
+          "cdn-loop": "cloudflare; loops=1; subreqs=1",
+          "cf-connecting-ip": "102.208.96.189",
+          "cf-ew-via": "15",
+          "cf-ipcountry": "ET",
+          "cf-ray": "98ffca7fd39dea37-FCO",
+          "cf-visitor": "{\"scheme\":\"https\"}",
+          "cf-worker": "n8n.cloud",
+          "content-type": "application/json",
+          "origin": "http://localhost:3000",
+          "priority": "u=1, i",
+          "referer": "http://localhost:3000/",
+          "sec-ch-ua": "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"Windows\"",
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "x-forwarded-for": "102.208.96.189, 162.158.116.95",
+          "x-forwarded-host": "snapwise.app.n8n.cloud",
+          "x-forwarded-port": "443",
+          "x-forwarded-proto": "https",
+          "x-forwarded-server": "traefik-prod-users-gwc-56-6f4b847c49-k42np",
+          "x-is-trusted": "yes",
+          "x-real-ip": "102.208.96.189"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+          "business_type": "SEO Agency",
+          "city": "Utah",
+          "country": "United State",
+          "website_link": "https://www.snapwise.marketing/",
+          "services": "SEO, PPC",
+          "recipient_email": "hello@snapwise.marketing"
+        },
+        "webhookUrl": "https://snapwise.app.n8n.cloud/webhook/d7a94f07-42aa-4083-9098-7b186151ae2b",
+        "executionMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "990cf39bc72894fdfba1bec571ac4de701a6a917ba24144e349501794c9430e4"
+  }
+}

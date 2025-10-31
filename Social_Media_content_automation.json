@@ -1,0 +1,1593 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Weekly Social Media Content Generator",
+        "formDescription": "Generate strategic weekly social media calendar",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Website URL",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Recipient Email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Instagram Handle"
+            },
+            {
+              "fieldLabel": "Twitter Handle"
+            },
+            {
+              "fieldLabel": "LinkedIn Page URL"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "311b3de1-23cd-4c22-ab17-8e16fe62313b",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -10096,
+        -416
+      ],
+      "webhookId": "social-gen"
+    },
+    {
+      "parameters": {
+        "jsCode": "const websiteUrl = $json['Website URL'];\nconst recipientEmail = $json['Recipient Email'];\nconst instagramHandle = $json['Instagram Handle'] || null;\nconst twitterHandle = $json['Twitter Handle'] || null;\nconst linkedinPage = $json['LinkedIn Page URL'] || null;\n\nif (!websiteUrl || !recipientEmail) {\n  throw new Error('Website URL and Recipient Email are required');\n}\n\nreturn [{\n  json: {\n    website_url: websiteUrl,\n    recipient_email: recipientEmail,\n    instagram_handle: instagramHandle,\n    twitter_handle: twitterHandle,\n    linkedin_page: linkedinPage,\n    workflow_start: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "5294cf00-f696-46b5-a86f-71f11de0822d",
+      "name": "Store Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9872,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.website_url }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "7592327b-5684-4e0e-985c-1e1a20143750",
+      "name": "Fetch Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -9648,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $json.data || '';\n\nfunction cleanHTML(html) {\n  return html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 20000);\n}\n\nconst cleanText = cleanHTML(html);\nconst prevData = $('Store Inputs').first().json;\n\nreturn [{\n  json: {\n    ...prevData,\n    website_content: cleanText\n  }\n}];"
+      },
+      "id": "7d2164f0-8a4e-4e6d-8c10-f3ec96468e88",
+      "name": "Clean Website Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -9424,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze this website and return ONLY valid JSON:\n{\"business_type\":\"B2B/B2C\",\"industry\":\"...\",\"target_audience\":[\"...\"],\"value_proposition\":\"...\",\"brand_tone\":\"...\",\"visual_style\":\"...\"}",
+              "role": "system"
+            },
+            {
+              "content": "={{ $json.website_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24ac60d7-69eb-42eb-96a5-75d1f7eb0700",
+      "name": "AI - Brand Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        -9200,
+        -416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json.message.content;\nconst jsonMatch = response.match(/\\{[\\s\\S]*\\}/);\nconst brandProfile = jsonMatch ? JSON.parse(jsonMatch[0]) : {};\nconst prevData = $('Clean Website Content').first().json;\n\nreturn [{\n  json: {\n    ...prevData,\n    brand_profile: brandProfile\n  }\n}];"
+      },
+      "id": "647dba02-05b6-40e1-8e18-3fc3399dae56",
+      "name": "Parse Brand Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -8848,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.instagram_handle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              },
+              "id": "277fd815-9da3-4743-9f13-facbec7fcdad"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f7bcd6d7-deb9-4b59-9579-34db38e88597",
+      "name": "Check Instagram Handle",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -8624,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer apify_api_XGELU8Hckzu3Iyxpfx1k0VJvFbqnXd4aB6IS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  usernames: [$json.instagram_handle],\n  resultsLimit: 20\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "3b7d59cd-8506-4e85-b2f1-6fba9fde3277",
+      "name": "Apify - Scrape Instagram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -8400,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "df5fa356-e582-4f54-9707-a70c5f7a977e",
+      "name": "Wait for Instagram",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -8176,
+        -336
+      ],
+      "webhookId": "wait-instagram"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Apify - Scrape Instagram').first().json.data.defaultDatasetId ? 'https://api.apify.com/v2/datasets/' + $('Apify - Scrape Instagram').first().json.data.defaultDatasetId + '/items' : 'https://api.apify.com' }}",
+        "options": {}
+      },
+      "id": "ccfd8b1f-0f64-4099-8136-cc85c9eacd15",
+      "name": "Get Instagram Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -7952,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const instagramData = $input.all()?.map(item => item?.json) ?? [];\n\nlet instagramInsights = {\n  profile_exists: false,\n  follower_count: 0,\n  following_count: 0,\n  biography: \"\",\n  post_count: 0,\n  recent_hashtags: [],\n  city_name: \"\",\n  captions: []\n};\n\nif (Array.isArray(instagramData) && instagramData?.length > 0) {\n  const profile = instagramData?.[0] ?? {};\n  \n  // Collect all hashtags\n  let allHashtags = [];\n  if (Array.isArray(profile?.latestPosts)) {\n    allHashtags = profile?.latestPosts\n      ?.flatMap(post => post?.hashtags ?? [])\n      ?.map(tag => tag?.trim() ?? \"\")\n      ?.filter(tag => tag?.length > 0) ?? [];\n\n    allHashtags = [...new Set(allHashtags)];\n  }\n\n  // Collect all captions\n  let allCaptions = [];\n  if (Array.isArray(profile?.latestPosts)) {\n    allCaptions = profile?.latestPosts\n      ?.map(post => post?.caption?.trim() ?? \"\")\n      ?.filter(caption => caption?.length > 0) ?? [];\n\n    allCaptions = [...new Set(allCaptions)];\n  }\n\n  instagramInsights = {\n    profile_exists: true,\n    follower_count: profile?.followersCount ?? 0,\n    following_count: profile?.followsCount ?? 0,\n    post_count: profile?.postsCount ?? 0,\n    recent_hashtags: allHashtags ?? [],\n    biography: profile?.biography ?? \"\",\n    city_name: profile?.businessAddress?.city_name ?? \"\",\n    captions: allCaptions ?? []\n  };\n}\n\nconst prevData = $node[\"Check Instagram Handle\"]?.json ?? {};\n\nreturn [\n  {\n    json: {\n      ...prevData,\n      instagram_insights: instagramInsights\n    }\n  }\n];\n"
+      },
+      "id": "94cb0b3a-3327-495e-ba7d-b1f9d1a78845",
+      "name": "Parse Instagram Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7728,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.twitter_handle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1d9fb4e9-726f-475c-b82e-8f863f30dccb",
+      "name": "Check Twitter Handle",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -7504,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/danek~twitter-scraper-ppr/runs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer apify_api_XGELU8Hckzu3Iyxpfx1k0VJvFbqnXd4aB6IS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  username: $json.twitter_handle,\n  max_posts: 20\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "2f7448e3-d47f-43e4-a0f6-5f49e33bf04c",
+      "name": "Apify - Scrape Twitter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -7280,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "7ef84655-6741-4a81-91ff-a70150a0e927",
+      "name": "Wait for Twitter",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -7056,
+        -336
+      ],
+      "webhookId": "wait-twitter"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Apify - Scrape Twitter').first().json.data.defaultDatasetId ? 'https://api.apify.com/v2/datasets/' + $('Apify - Scrape Twitter').first().json.data.defaultDatasetId + '/items' : 'https://api.apify.com' }}",
+        "options": {}
+      },
+      "id": "18c2e34d-8a80-43ae-96ec-013ed9df1c85",
+      "name": "Get Twitter Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -6832,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const twitterData = $input.all()?.map(item => item?.json) ?? [];\n\nlet twitterInsights = {\n  tweets: []\n};\n\n// Check if input is a list of tweets\nif (Array.isArray(twitterData) && twitterData?.length > 0) {\n  // Extract all text fields into an array\n  const tweets = twitterData\n    ?.map(t => t?.text?.trim?.() ?? \"\")\n    ?.filter(text => text?.length > 0) ?? [];\n\n  // Assign to insights\n  twitterInsights = {\n    tweets: tweets ?? []\n  };\n}\n\nconst prevData = $node[\"Check Twitter Handle\"]?.json ?? {};\n\nreturn [\n  {\n    json: {\n      ...prevData,\n      twitter_insights: twitterInsights\n    }\n  }\n];\n"
+      },
+      "id": "285d1c3b-dbce-4fb6-9613-f563858a5f52",
+      "name": "Parse Twitter Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6608,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.linkedin_page }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5379789f-3e7e-4e0d-9f89-ab47ac538938",
+      "name": "Check LinkedIn Page",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -6384,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/apimaestro~linkedin-batch-profile-posts-scraper/runs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer apify_api_XGELU8Hckzu3Iyxpfx1k0VJvFbqnXd4aB6IS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  usernames: [$json.linkedin_page],\n  limit: 10\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "58635422-be89-4409-b650-98ba75dbf08a",
+      "name": "Apify - Scrape LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -6160,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60
+      },
+      "id": "6305cc5a-704b-4b19-b66c-5120f7351b38",
+      "name": "Wait for LinkedIn",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -5936,
+        -480
+      ],
+      "webhookId": "wait-linkedin"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Apify - Scrape LinkedIn').first().json.data.defaultDatasetId ? 'https://api.apify.com/v2/datasets/' + $('Apify - Scrape LinkedIn').first().json.data.defaultDatasetId + '/items' : 'https://api.apify.com' }}",
+        "options": {}
+      },
+      "id": "0db47c2d-c637-43a9-a939-e4e5bc6bd131",
+      "name": "Get LinkedIn Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -5712,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const linkedinData = $input.all()?.map(item => item?.json) ?? [];\n\nlet linkedinInsights = {\n  posts: []\n};\n\n// Check if input is a list of posts\nif (Array.isArray(linkedinData) && linkedinData?.length > 0) {\n  // Extract all text fields into an array\n  const posts = linkedinData\n    ?.map(t => t?.text?.trim?.() ?? \"\")\n    ?.filter(text => text?.length > 0) ?? [];\n\n  // Assign to insights\n  linkedinInsights = {\n    posts: posts ?? []\n  };\n}\n\nconst prevData = $node[\"Check LinkedIn Page\"]?.json ?? {};\n\nreturn [\n  {\n    json: {\n      ...prevData,\n      linkedin_insights: linkedinInsights\n    }\n  }\n];\n"
+      },
+      "id": "a7c0586a-c485-47a9-a7df-9f0b748e879b",
+      "name": "Parse LinkedIn Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5488,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst currentDate = new Date();\nconst seasonalEvents = [];\nconst month = currentDate.getMonth();\n\nif (month === 11 || month === 0) {\n  seasonalEvents.push('Holiday Season', 'New Year Planning', 'Q4 Wrap-up');\n} else if (month >= 9 && month <= 10) {\n  seasonalEvents.push('Q4 Planning', 'Holiday Prep', 'Black Friday');\n} else if (month >= 1 && month <= 2) {\n  seasonalEvents.push('Q1 Goals', 'New Year Resolutions', 'Spring Planning');\n} else if (month >= 3 && month <= 5) {\n  seasonalEvents.push('Spring Refresh', 'Mid-year Planning', 'Summer Prep');\n} else {\n  seasonalEvents.push('Summer Season', 'Back to School', 'Q3 Reviews');\n}\n\nconst industry = data.brand_profile.industry || '';\nconst trendingTopics = [\n  `${industry} trends 2025`,\n  `${industry} best practices`,\n  `${industry} innovation`\n];\n\nconst allHashtags = [];\nif (data.instagram_insights && data.instagram_insights.recent_hashtags) {\n  allHashtags.push(...data.instagram_insights.recent_hashtags);\n}\nif (data.twitter_insights && data.twitter_insights.recent_hashtags) {\n  allHashtags.push(...data.twitter_insights.recent_hashtags);\n}\n\nconst industryClean = industry.toLowerCase().replace(/\\s+/g, '');\nconst defaultHashtags = [\n  `#${industryClean}`,\n  '#business',\n  '#marketing',\n  '#entrepreneur',\n  '#innovation'\n];\n\nconst relevantHashtags = allHashtags.length > 0 ? \n  [...new Set(allHashtags)].slice(0, 15) : defaultHashtags;\n\nreturn [{\n  json: {\n    ...data,\n    trending_topics: trendingTopics,\n    seasonal_events: seasonalEvents,\n    relevant_hashtags: relevantHashtags\n  }\n}];"
+      },
+      "id": "1dc2f20f-68b3-40b1-b113-aef93dad99f3",
+      "name": "Aggregate Market Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5264,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Create 4 content pillars based on brand and market context. Return ONLY JSON:\n{\"pillars\":[{\"name\":\"...\",\"description\":\"...\"}]}",
+              "role": "system"
+            },
+            {
+              "content": "=Brand: {{ JSON.stringify($json.brand_profile) }}\nTrending: {{ JSON.stringify($json.trending_topics) }}\nSeasonal: {{ JSON.stringify($json.seasonal_events) }}\n\nInstagram Insights: {{ JSON.stringify($json.instagram_insights || {}) }}\nTwitter Insights: {{ JSON.stringify($json.twitter_insights || {}) }}\nLinkedIn Insights: {{ JSON.stringify($json.linkedin_insights || {}) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e290c19d-0ad9-44d1-a27a-a4c5944c69ec",
+      "name": "AI - Content Pillars",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        -5040,
+        -416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json.message.content;\nconst jsonMatch = response.match(/\\{[\\s\\S]*\\}/);\nconst pillarsData = jsonMatch ? JSON.parse(jsonMatch[0]) : {pillars:[]};\nconst prevData = $('Aggregate Market Context').first().json;\n\nconst ctaLibrary = {\n  Awareness: ['Follow for insights', 'Save this', 'Share with network'],\n  Consideration: ['Read full guide', 'Download resource', 'Join webinar'],\n  Conversion: ['Book demo', 'Start trial', 'Sign up today']\n};\n\nreturn [{\n  json: {\n    ...prevData,\n    content_pillars: pillarsData.pillars,\n    cta_library: ctaLibrary\n  }\n}];"
+      },
+      "id": "7ee839ab-20c7-4e9a-b8a3-d7a8b607cea9",
+      "name": "Store Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4688,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst weekDates = [];\nconst currentDate = new Date();\n\nfor (let i = 0; i < 7; i++) {\n  const date = new Date(currentDate);\n  date.setDate(date.getDate() + i);\n  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];\n  weekDates.push({\n    day: dayNames[date.getDay()],\n    date: date.toISOString().split('T')[0]\n  });\n}\n\nconst platforms = [];\nif (data.instagram_handle) platforms.push('Instagram');\nif (data.twitter_handle) platforms.push('Twitter');\nif (data.linkedin_page) platforms.push('LinkedIn');\n\nif (platforms.length === 0) {\n  throw new Error('Provide at least one social platform');\n}\n\nconst postGrid = [];\nweekDates.forEach(dateObj => {\n  platforms.forEach(platform => {\n    postGrid.push({day: dateObj.day, date: dateObj.date, platform});\n  });\n});\n\nconst pillars = data.content_pillars.map(p => p.name);\nconst totalPosts = postGrid.length;\n\nconst funnelStages = [];\nfor(let i=0; i<Math.round(totalPosts*0.5); i++) funnelStages.push('Awareness');\nfor(let i=0; i<Math.round(totalPosts*0.3); i++) funnelStages.push('Consideration');\nwhile(funnelStages.length < totalPosts) funnelStages.push('Conversion');\n\nfor(let i=funnelStages.length-1; i>0; i--) {\n  const j = Math.floor(Math.random()*(i+1));\n  [funnelStages[i], funnelStages[j]] = [funnelStages[j], funnelStages[i]];\n}\n\nconst enrichedGrid = postGrid.map((post, idx) => ({\n  ...post,\n  pillar: pillars[idx % pillars.length],\n  funnel_stage: funnelStages[idx]\n}));\n\nreturn [{\n  json: {\n    ...data,\n    week_dates: weekDates,\n    platforms,\n    post_grid: enrichedGrid\n  }\n}];"
+      },
+      "id": "48523665-ac07-4f9b-a7df-bc93add4cfda",
+      "name": "Plan Week Calendar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4464,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Generate post concepts for social calendar. Return JSON array with concept, hook, visual_idea for each post.\nGuidelines:\n1. Avoid mentioning specific years (like 2024 or 2025).\n2. Focus on future-oriented, timeless, or upcoming trends (use phrases like “the future of…”, “next generation…”, “emerging trends…” instead of specific dates).\n3. Ensure all ideas will stay relevant in late 2025 and throughout 2026.\n4. Keep tone inspiring, innovative, and aligned with the brand’s voice.\n5. Each post must feel distinct, not repetitive.",
+              "role": "system"
+            },
+            {
+              "content": "=Brand: {{ JSON.stringify($json.brand_profile) }}\nPillars: {{ JSON.stringify($json.content_pillars) }}\nPosts: {{ JSON.stringify($json.post_grid) }}\n\nGenerate {{ $json.post_grid.length }} unique concepts."
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 4000
+        }
+      },
+      "id": "16dab2f7-d558-4377-b918-57e239176e4c",
+      "name": "AI - Generate Concepts",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        -4240,
+        -416
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json.message?.content || \"\";\n\n// Try to extract JSON array from markdown code block or inline\nlet jsonMatch = response.match(/```json([\\s\\S]*?)```/);\nif (!jsonMatch) {\n  jsonMatch = response.match(/\\[[\\s\\S]*\\]/);\n}\n\nlet concepts = [];\nif (jsonMatch) {\n  let jsonText = jsonMatch[1] || jsonMatch[0];\n\n  // Clean up common formatting issues\n  jsonText = jsonText\n    .replace(/“|”/g, '\"')              // Replace curly quotes\n    .replace(/,\\s*}/g, '}')           // Trailing commas before object end\n    .replace(/,\\s*]/g, ']')           // Trailing commas before array end\n    .replace(/(\\w)\"(\\w)/g, '$1\\\\\"$2') // Escaped quotes inside words (rare)\n\n  try {\n    concepts = JSON.parse(jsonText);\n  } catch (err) {\n    console.warn(\"JSON parsing failed:\", err.message);\n    concepts = [];\n  }\n}\n\nconst prevData = $('Plan Week Calendar').first().json;\nconst postGrid = prevData.post_grid || [];\n\nconst enrichedPosts = postGrid.map((post, idx) => {\n  const concept = concepts[idx] || {\n    concept: \"Post\",\n    hook: \"Default Hook\",\n    visual_idea: \"Default Visual Idea\"\n  };\n\n  const ctas = prevData.cta_library?.[post.funnel_stage] || [];\n  const cta = ctas.length ? ctas[Math.floor(Math.random() * ctas.length)] : \"Learn more\";\n\n  return { ...post, ...concept, cta };\n});\n\nreturn [{\n  json: {\n    ...prevData,\n    content_calendar: enrichedPosts\n  }\n}];\n"
+      },
+      "id": "fa4b79c6-07cd-4ca4-8a4b-641641b42818",
+      "name": "Merge Concepts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3888,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allData = $input.first().json;\nconst posts = allData.content_calendar;\n\nreturn posts.map((post, idx) => ({\n  json: {\n    ...post,\n    post_index: idx,\n    brand_profile: allData.brand_profile,\n    recipient_email: allData.recipient_email,\n    platforms: allData.platforms,\n    total_calendar_posts: posts.length\n  }\n}));"
+      },
+      "id": "c060c8d4-6026-416b-82c7-daf669a2eaa4",
+      "name": "Prepare Posts for Loop",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3664,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "5e9b720d-9761-44a8-aa2b-346b0660857c",
+      "name": "Loop Over Posts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3440,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.platform === 'LinkedIn' ? 'Write LinkedIn post 150-250 words. Professional tone. Include 3-5 hashtags. Return JSON: {\"caption\":\"...\",\"hashtags\":[\"#tag1\",\"#tag2\"]}' : $json.platform === 'Instagram' ? 'Write Instagram caption 100-150 words. Include 3-5 emojis. Include 10-15 hashtags. Return JSON: {\"caption\":\"...\",\"hashtags\":[\"#tag1\"]}' : 'Write Twitter post 240-280 characters. Include 1-2 hashtags max. Return JSON: {\"caption\":\"...\",\"hashtags\":[\"#tag1\"]}' }}",
+              "role": "system"
+            },
+            {
+              "content": "=Brand Tone: {{ $json.brand_profile.brand_tone }}\nIndustry: {{ $json.brand_profile.industry }}\n\nPost Details:\nPlatform: {{ $json.platform }}\nPillar: {{ $json.pillar }}\nFunnel Stage: {{ $json.funnel_stage }}\nConcept: {{ $json.concept }}\nHook: {{ $json.hook }}\nCTA: {{ $json.cta }}\n\nWrite the caption."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "23084139-2331-4734-89ed-d3f355b13332",
+      "name": "AI - Generate Caption",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        -3216,
+        -704
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json.message.content;\nconst jsonMatch = response.match(/\\{[\\s\\S]*\\}/);\n\nlet captionData = { caption: '', hashtags: [] };\n\nif (jsonMatch) {\n  try {\n    captionData = JSON.parse(jsonMatch[0]);\n    // Ensure hashtags field exists and is an array\n    if (!Array.isArray(captionData.hashtags)) {\n      captionData.hashtags = [];\n    }\n  } catch (e) {\n    captionData = { caption: 'Caption generation failed', hashtags: [] };\n  }\n}\n\nconst postData = $('Loop Over Posts').first().json;\n\n// Safe handling — join always works now\nconst captionFull =\n  (captionData.caption || '') + '\\n\\n' + (captionData.hashtags || []).join(' ');\n\nreturn [\n  {\n    json: {\n      ...postData,\n      caption_full: captionFull.trim(),\n      caption_clean: captionData.caption || '',\n      hashtags: captionData.hashtags || []\n    }\n  }\n];\n"
+      },
+      "id": "a08bf0eb-bea3-4476-afe6-26d38b448d38",
+      "name": "Parse Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2864,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Generate detailed image prompt for AI image generation. Be specific about composition, colors, mood, style. Keep under 200 characters. No text/words in image. Return only the prompt text, no JSON.",
+              "role": "system"
+            },
+            {
+              "content": "=Post Concept: {{ $json.concept }}\nVisual Idea: {{ $json.visual_idea }}\nBrand Visual Style: {{ $json.brand_profile.visual_style }}\nBrand Tone: {{ $json.brand_profile.brand_tone }}\nPlatform: {{ $json.platform }}\n\nGenerate image prompt."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ef5bf5e8-b246-44d3-a399-8d8c336a35c8",
+      "name": "AI - Image Prompt",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        -2640,
+        -704
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const imagePrompt =  $input.first().json.message.content;\nconst postData = $('Parse Caption').first().json;\n\nreturn [{\n  json: {\n    ...postData,\n    image_prompt: imagePrompt\n  }\n}];"
+      },
+      "id": "21879bdb-1c86-418e-abb9-681560e0b22b",
+      "name": "Store Image Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2288,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.nanobananaapi.ai/api/v1/nanobanana/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ac09a64c1c126b6eb913deb09931d935"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({prompt: $json.image_prompt, width: 1024, height: 1024, quality: 'high', \"numImages\": 1,\n    \"type\": \"TEXTTOIAMGE\",}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "ddfeac74-0109-48aa-9295-006080d57cdf",
+      "name": "NanoBanana - Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2064,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.data.response.resultImageUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "24ab22b4-4924-4133-8860-d31463c85b8a",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1392,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "name": "={{ 'Social_Content_' + new Date().toISOString().split('T')[0] + '/originals/' + $('Store Image Prompt').first().json.day + '_' + $('Store Image Prompt').first().json.platform + '_' + $('Store Image Prompt').first().json.pillar.replace(/\\s+/g, '_') + '.png' }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root"
+        },
+        "options": {}
+      },
+      "id": "f9a897a6-e20e-49ba-b424-0cb680787372",
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1168,
+        -816
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "iz8Op7e51wGo9ICt",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const postData = $('Store Image Prompt').first().json;\nconst uploadData = $json;\nconst imageUrl = `https://drive.google.com/file/d/${uploadData.id}/view`;\n\nlet targetWidth, targetHeight;\nif (postData.platform === 'LinkedIn') {\n  targetWidth = 1200;\n  targetHeight = 627;\n} else if (postData.platform === 'Instagram') {\n  targetWidth = 1080;\n  targetHeight = 1080;\n} else if (postData.platform === 'Twitter') {\n  targetWidth = 1200;\n  targetHeight = 675;\n} else {\n  targetWidth = 1024;\n  targetHeight = 1024;\n}\n\nreturn [{\n  json: {\n    ...postData,\n    image_url: imageUrl,\n    image_drive_id: uploadData.id,\n    target_width: targetWidth,\n    target_height: targetHeight,\n    status: 'Generated'\n  }\n}];"
+      },
+      "id": "40ca3498-f6c1-4eb2-ac34-0aa8da3f5429",
+      "name": "Store Image Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        -816
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "id": "e104aa4b-6c46-4a77-a600-f7cec363a02c",
+      "name": "Rate Limit (3s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -720,
+        -816
+      ],
+      "webhookId": "rate-limit-gen"
+    },
+    {
+      "parameters": {
+        "jsCode": "const currentPost = $input.first().json;\nconst postIndex = currentPost.post_index || 0;\nconst totalPosts = currentPost.total_calendar_posts || 0;\n\nconsole.log(`Generated post ${postIndex + 1}/${totalPosts}: ${currentPost.day} - ${currentPost.platform}`);\n\nreturn $input.all();"
+      },
+      "id": "c078183e-9329-404d-8df6-a5ba80e839a8",
+      "name": "Log Progress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\nconst firstItem = allItems[0].json;\nconst generatedPosts = allItems.map(item => item.json);\n\nreturn [{\n  json: {\n    brand_profile: firstItem.brand_profile,\n    recipient_email: firstItem.recipient_email,\n    platforms: firstItem.platforms,\n    generated_posts: generatedPosts,\n    total_posts: generatedPosts.length\n  }\n}];"
+      },
+      "id": "679dd67b-1416-44f9-8509-3988e1c454f0",
+      "name": "Prepare Final Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3152,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "spreadsheet",
+        "title": "={{ 'Social Content - ' + $json.brand_profile.industry + ' - ' + new Date().toISOString().split('T')[0] }}",
+        "options": {}
+      },
+      "id": "e9ffedf9-8c01-46dd-86a8-c391d04b02ef",
+      "name": "Create Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2864,
+        -416
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheetId = $json.spreadsheetId;\nconst sheetUrl = $json.spreadsheetUrl;\nconst prevData = $('Prepare Final Data').first().json;\n\nreturn [{\n  json: {\n    ...prevData,\n    sheet_id: sheetId,\n    sheet_url: sheetUrl\n  }\n}];"
+      },
+      "id": "ae55e68b-f60e-48ba-b212-e01719a2aedb",
+      "name": "Store Sheet Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2576,
+        -416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst posts = data.generated_posts || [];\n\nreturn posts.map(post => ({\n  json: {\n    Day: post.day,\n    Date: post.date,\n    Platform: post.platform,\n    Pillar: post.pillar,\n    Concept: post.concept,\n    Caption: post.caption_clean,\n    Hashtags: post.hashtags.join(' '),\n    Image_URL: post.image_url,\n    Status: post.status\n  }\n}));"
+      },
+      "id": "90e235a6-be20-4245-abab-b1ecfd470f51",
+      "name": "Format Sheet Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2288,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Store Sheet Info').first().json.sheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "c3ea371d-c8af-4a1c-88fb-1f97d20c8819",
+      "name": "Write to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -2064,
+        -320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Store Sheet Info').first().json.recipient_email }}",
+        "subject": "📅 Your Weekly Social Content is Ready!",
+        "message": "=<h2>Weekly Social Content Ready</h2>\n<p>Your content calendar is complete!</p>\n<p><strong>Total Posts:</strong> {{ $('Store Sheet Info').first().json.total_posts }}</p>\n<p><strong>Platforms:</strong> {{ $('Store Sheet Info').first().json.platforms.join(', ') }}</p>\n<h3>Resources:</h3>\n<ul>\n<li><a href=\"{{ $('Store Sheet Info').first().json.sheet_url }}\">Google Sheet</a></li>\n</ul>\n<p>Review and approve!</p>",
+        "options": {}
+      },
+      "id": "4266f448-8743-404b-9f17-03af11fc1b8a",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -2288,
+        -512
+      ],
+      "webhookId": "86341ce1-ea6b-415d-9f6b-dd88132c9173",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "5HiwL6s4QO4OXwdt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log('✅ Workflow Complete!');\nconsole.log('Total Posts:', $('Store Sheet Info').first().json.total_posts);\nconsole.log('Sheet:', $('Store Sheet Info').first().json.sheet_url);\nreturn $input.all();"
+      },
+      "id": "dfd0d48a-dac2-4cce-a0a5-94c3a084db7c",
+      "name": "Log Complete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        -512
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.nanobananaapi.ai/api/v1/nanobanana/record-info",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "taskId",
+              "value": "={{ $json.data.taskId }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer ac09a64c1c126b6eb913deb09931d935"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1840,
+        -704
+      ],
+      "id": "2d62ae3d-9974-4ab8-a548-1f90c0c78423",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "73f7594d-b7c8-42d3-b1ba-4172c11493ec",
+              "leftValue": "={{$json[\"data\"][\"successFlag\"]}}",
+              "rightValue": "1",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1616,
+        -768
+      ],
+      "id": "700b3c0e-ba9f-412f-9fdf-6974615e0378",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1392,
+        -528
+      ],
+      "id": "e358ff67-2b71-4c01-9678-67db33d4880c",
+      "name": "Wait",
+      "webhookId": "71213137-53c8-4ec2-a870-58f68a445ca4"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Store Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Inputs": {
+      "main": [
+        [
+          {
+            "node": "Fetch Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Website": {
+      "main": [
+        [
+          {
+            "node": "Clean Website Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Website Content": {
+      "main": [
+        [
+          {
+            "node": "AI - Brand Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Brand Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse Brand Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Brand Profile": {
+      "main": [
+        [
+          {
+            "node": "Check Instagram Handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Instagram Handle": {
+      "main": [
+        [
+          {
+            "node": "Apify - Scrape Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Twitter Handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify - Scrape Instagram": {
+      "main": [
+        [
+          {
+            "node": "Wait for Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Instagram": {
+      "main": [
+        [
+          {
+            "node": "Get Instagram Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instagram Data": {
+      "main": [
+        [
+          {
+            "node": "Parse Instagram Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Instagram Data": {
+      "main": [
+        [
+          {
+            "node": "Check Twitter Handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Twitter Handle": {
+      "main": [
+        [
+          {
+            "node": "Apify - Scrape Twitter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check LinkedIn Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify - Scrape Twitter": {
+      "main": [
+        [
+          {
+            "node": "Wait for Twitter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Twitter": {
+      "main": [
+        [
+          {
+            "node": "Get Twitter Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Twitter Data": {
+      "main": [
+        [
+          {
+            "node": "Parse Twitter Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Twitter Data": {
+      "main": [
+        [
+          {
+            "node": "Check LinkedIn Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check LinkedIn Page": {
+      "main": [
+        [
+          {
+            "node": "Apify - Scrape LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Market Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify - Scrape LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Wait for LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Get LinkedIn Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get LinkedIn Data": {
+      "main": [
+        [
+          {
+            "node": "Parse LinkedIn Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LinkedIn Data": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Market Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Market Context": {
+      "main": [
+        [
+          {
+            "node": "AI - Content Pillars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Content Pillars": {
+      "main": [
+        [
+          {
+            "node": "Store Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Strategy": {
+      "main": [
+        [
+          {
+            "node": "Plan Week Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Week Calendar": {
+      "main": [
+        [
+          {
+            "node": "AI - Generate Concepts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Generate Concepts": {
+      "main": [
+        [
+          {
+            "node": "Merge Concepts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Concepts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Posts for Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Posts for Loop": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI - Generate Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Generate Caption": {
+      "main": [
+        [
+          {
+            "node": "Parse Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Caption": {
+      "main": [
+        [
+          {
+            "node": "AI - Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Store Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "NanoBanana - Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NanoBanana - Generate Image": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Upload to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [
+          {
+            "node": "Store Image Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Image Info": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit (3s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit (3s)": {
+      "main": [
+        [
+          {
+            "node": "Log Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Progress": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Final Data": {
+      "main": [
+        [
+          {
+            "node": "Create Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Store Sheet Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Sheet Info": {
+      "main": [
+        [
+          {
+            "node": "Format Sheet Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Sheet Data": {
+      "main": [
+        [
+          {
+            "node": "Write to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Sheet": {
+      "main": [
+        []
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Log Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Webhook Trigger": [
+      {
+        "Website URL": "https://chaingpt.org/",
+        "Recipient Email": "hello@snapwise.marketing",
+        "Instagram Handle": "chaingptai",
+        "Twitter Handle": "Chain_GPT",
+        "LinkedIn Page URL": "https://www.linkedin.com/company/chaingpt/",
+        "submittedAt": "2025-10-21T23:18:14.581+02:00",
+        "formMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "990cf39bc72894fdfba1bec571ac4de701a6a917ba24144e349501794c9430e4"
+  }
+}

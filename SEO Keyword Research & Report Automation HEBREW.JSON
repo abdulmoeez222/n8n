@@ -1,0 +1,1636 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "url": "={{ $('Webhook').item.json.body['Website URL'] }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d25933c2-d309-455e-a7cc-c7d91fc39547",
+      "name": "Fetch Homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract all internal links from homepage\nconst html = $input.first().json.data;\nconst baseUrl = $('Webhook').first().json.body['Website URL'];\n\nfunction extractLinks(html, baseUrl) {\n  const links = new Set();\n\n  // --- Extract protocol and domain manually ---\n  const protocol = baseUrl.startsWith('https') ? 'https:' : 'http:';\n  const domain = baseUrl.replace(/^https?:\\/\\//, '').split('/')[0];\n\n  // --- Regex to capture href links ---\n  const linkRegex = /href\\s*=\\s*[\"']([^\"']+)[\"']/gi;\n  let match;\n\n  while ((match = linkRegex.exec(html)) !== null) {\n    let link = match[1].trim();\n\n    // Skip unwanted types\n    if (!link || link.startsWith('#') || link.startsWith('javascript:') || \n        link.startsWith('mailto:') || link.startsWith('tel:')) continue;\n\n    // Handle relative links\n    if (link.startsWith('/')) {\n      link = `${protocol}//${domain}${link}`;\n    } else if (!/^https?:\\/\\//i.test(link)) {\n      // Handle relative paths like \"about-us\"\n      link = `${protocol}//${domain}/${link}`;\n    }\n\n    // --- Check if it's internal (same domain) ---\n    const host = link.replace(/^https?:\\/\\//, '').split('/')[0];\n    if (host === domain) {\n      links.add(link);\n    }\n  }\n\n  // --- Prioritize important pages first ---\n  const allLinks = Array.from(links);\n  const priorityKeywords = /product|service|about|business|sector|solution|offer|contact|blog|playbook|pricing|case|portfolio/i;\n  const priorityLinks = allLinks.filter(l => priorityKeywords.test(l));\n\n  // Combine priority + others (limit 10)\n  const finalLinks = [...priorityLinks, ...allLinks.filter(l => !priorityLinks.includes(l))].slice(0, 10);\n\n  return finalLinks;\n}\n\nconst links = extractLinks(html, baseUrl);\nreturn links.map(link => ({ json: { url: link } }));\n"
+      },
+      "id": "55358d73-b80d-455c-82c8-67e711abd183",
+      "name": "Extract Key Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "9b985d60-741c-4f67-8242-9b058ccde65b",
+      "name": "Crawl Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean and extract text from all crawled pages\nconst items = $input.all();\nlet allText = '';\n\nfunction cleanHTML(html) {\n  return html\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nitems.forEach(item => {\n  if (item.json.data) {\n    allText += cleanHTML(item.json.data) + '\\n\\n';\n  }\n});\n\n// Add homepage text\nconst homepage = $('Fetch Homepage').first().json.data;\nallText = cleanHTML(homepage) + '\\n\\n' + allText;\n\nreturn [{ json: { \n  fullText: allText,\n  websiteUrl: $('Webhook').first().json.body['Website URL']\n}}];"
+      },
+      "id": "4b30483e-d9d6-41ca-9d8f-9bbf92b75098",
+      "name": "Aggregate Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.fullText }}",
+        "options": {
+          "systemMessage": "Analyze this website content and extract:\n\n1. MAIN BUSINESS/OFFERINGS (2-3 sentences)\n2. PRIMARY TOPICS (5-7 core themes)\n3. PRODUCTS/SERVICES (list all mentioned)\n4. TARGET AUDIENCE\n5. KEY ENTITIES (brands, technologies, locations)\n6. COMMON QUESTIONS/PROBLEMS addressed\n\nBe comprehensive but concise. Focus on SEO-relevant information. You must reply in Hebrew."
+        }
+      },
+      "id": "cd804b7b-ff25-401b-b95b-2471dd7d932d",
+      "name": "Analyze Content with AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        496,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "id": "3efacb68-828e-45be-9214-1c80c944154e",
+      "name": "OpenAI - Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        576,
+        320
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.output }}",
+        "options": {
+          "systemMessage": "Based on this website analysis, generate 50 SEED KEYWORDS for SEO.\n\nInclude:\n- Core product/service terms\n- Industry-specific keywords\n- Problem-solution queries\n- Branded terms\n- Long-tail variations\n\nFormat: One keyword per line, no numbering, no special characters.\nMix of short (1-2 word) and long-tail (3-5 word) keywords. You must reply in Hebrew."
+        }
+      },
+      "id": "c145b3ff-af4f-41b6-8cf6-473ebdbf43cc",
+      "name": "Generate Seed Keywords",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        848,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "id": "1b500459-29a1-4be7-976b-7d5a52ea0183",
+      "name": "OpenAI - Seeds",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        928,
+        320
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse seed keywords into array\nconst output = $json.output;\nconst keywords = output\n  .split('\\n')\n  .map(k => k.replace(/^[\\d\\.\\-\\*#]+\\s*/g, '').trim())\n  .filter(k => k.length > 2 && k.length < 100)\n  .map(k => k.toLowerCase());\n\nconst unique = [...new Set(keywords)];\n\nreturn unique.slice(0, 50).map(kw => ({\n  json: {\n    keyword: kw,\n    source: 'seed',\n    websiteUrl: $('Webhook').first().json.body['Website URL']\n  }\n}));"
+      },
+      "id": "4af4e716-16ba-4471-8efd-8776f8b6760b",
+      "name": "Parse Seed Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplicate and prepare for enrichment\nconst items = $input.all();\nconst keywordMap = new Map();\n\nitems.forEach(item => {\n  const kw = item.json.keyword?.toLowerCase().trim();\n  if (kw && kw.length > 2 && kw.length < 100) {\n    if (!keywordMap.has(kw)) {\n      keywordMap.set(kw, {\n        keyword: kw,\n        source: item.json.source || 'seed'\n      });\n    }\n  }\n});\n\nconst unique = Array.from(keywordMap.values());\nconsole.log(`Total unique keywords: ${unique.length}`);\n\nreturn unique.map(kw => ({ json: kw }));"
+      },
+      "id": "0a2cfd6e-f1af-4051-85a1-4ac3f86a20ae",
+      "name": "Deduplicate Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify([\n  {\n    keywords: $json.keywords,\n    location_name: $('Webhook').first().json.body.Location\n  }\n]) }}",
+        "options": {}
+      },
+      "id": "fab539c9-9b9f-4295-9a30-61275e35d980",
+      "name": "Get Volume & Difficulty",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1872,
+        96
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "5SwSJgoL6VpRcY7E",
+          "name": "DataforSEO"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst keywords = $('Deduplicate Keywords').all();\nconst results = [];\n\nif (response.tasks && response.tasks.length > 0) {\n  const task = response.tasks[0];\n\n  // If the API returned valid results\n  if (task.result && Array.isArray(task.result)) {\n    task.result.forEach((item, idx) => {\n      const k = keywords[idx]?.json?.keyword || 'unknown';\n      results.push({\n        keyword: k,\n        search_volume: item.search_volume || 0,\n        keyword_difficulty: item.keyword.length || 50,\n        competition: item.competition || 'N/A',\n        cpc: item.cpc || 0,\n        source: keywords[idx]?.json?.source || 'N/A',\n        status_message: task.status_message || 'OK'\n      });\n    });\n  } else {\n    // No valid results, log the error\n    results.push({\n      keyword: keywords.map(k => k.json.keyword).join(', '),\n      search_volume: 0,\n      keyword_difficulty: 0,\n      competition: 'N/A',\n      cpc: 0,\n      source: 'error',\n      status_message: task.status_message || 'No result returned'\n    });\n  }\n}\n\nreturn results.map(r => ({ json: r }));\n"
+      },
+      "id": "17395302-ad4e-40a6-9f57-a0ca7afb59ba",
+      "name": "Parse Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter out zero-volume keywords\nconst items = $input.all();\n\nconst filtered = items.filter(item => {\n  const vol = item.json.search_volume;\n  return vol && vol > 0;\n});\n\nconsole.log(`Filtered: ${filtered.length} keywords with volume > 0`);\n\nreturn filtered;"
+      },
+      "id": "8d2a9285-a793-4562-8c3f-40f3ba63dd84",
+      "name": "Filter Zero Volume",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($input.all().map(i => i.json.keyword)) }}",
+        "options": {
+          "systemMessage": "For each keyword, assign:\n\n1. PILLAR: High-level theme (5-8 pillars max)\n2. CLUSTER: Specific subtopic under the pillar\n3. INTENT: Informational | Commercial | Transactional | Navigational\n\nReturn as JSON array:\n[\n  {\"keyword\": \"...\", \"pillar\": \"...\", \"cluster\": \"...\", \"intent\": \"...\"},\n  ...\n]\n\nBe consistent with pillar/cluster naming. You must reply in Hebrew. "
+        }
+      },
+      "id": "d53c3d1a-9313-4cd1-952b-05efeffa5140",
+      "name": "Categorize with AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        2544,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "id": "7bd2f543-a346-4fdd-911c-e0cc5c4dcec6",
+      "name": "OpenAI - Categorize",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2624,
+        320
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "yHAAweYD0MKFqthG",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all categorization outputs\nconst inputs = $input.all();\nlet mergedCategorization = [];\n\n// Parse each output safely (remove markdown fences if present)\nfor (const item of inputs) {\n  let text = item.json.output?.trim() || '';\n  text = text.replace(/^```json|```$/g, '').trim(); // remove ```json and ending ```\n  text = text.replace(/^```|```$/g, '').trim();     // remove any leftover ```\n  \n  try {\n    const parsed = JSON.parse(text);\n    if (Array.isArray(parsed)) mergedCategorization = mergedCategorization.concat(parsed);\n  } catch (e) {\n    console.log('❌ Skipped invalid JSON block:', e.message);\n  }\n}\n\n// Get keyword metrics data\nconst metricsData = $('Filter Zero Volume').all();\n\n// Merge categorization with metrics\nconst enriched = metricsData.map(item => {\n  const kw = item.json.keyword;\n  const cat = mergedCategorization.find(c => c.keyword === kw) || {};\n  \n  return {\n    json: {\n      keyword: kw,\n      pillar: cat.pillar || 'Uncategorized',\n      cluster: cat.cluster || 'General',\n      intent: cat.intent || 'Informational',\n      search_volume: item.json.search_volume,\n      keyword_difficulty: item.json.keyword_difficulty,\n      source_type: item.json.source,\n      competition: item.json.competition,\n      cpc: item.json.cpc\n    }\n  };\n});\n\nreturn enriched;\n"
+      },
+      "id": "6c3d3078-08c8-4087-b822-f5b98e3fb307",
+      "name": "Merge Categorization",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate priority score and add recommendations\nconst items = $input.all();\n\nconst scored = items.map(item => {\n  const vol = item.json.search_volume || 0;\n  const kd = item.json.keyword_difficulty || 50;\n  \n  // Priority formula: (Volume / 100) * (100 - KD) / 50\n  // Balances volume with achievability\n  const priorityScore = Math.round((vol / 100) * ((100 - kd) / 50) * 10) / 10;\n  \n  // Generate content angle\n  let contentAngle = '';\n  const intent = item.json.intent;\n  \n  if (intent === 'Informational') {\n    contentAngle = 'Blog post, guide, or how-to article';\n  } else if (intent === 'Commercial') {\n    contentAngle = 'Comparison page, product review, or buyer guide';\n  } else if (intent === 'Transactional') {\n    contentAngle = 'Product/service page with clear CTA';\n  } else {\n    contentAngle = 'Brand/navigation page';\n  }\n  \n  return {\n    json: {\n      ...item.json,\n      priority_score: priorityScore,\n      notes: contentAngle\n    }\n  };\n});\n\n// Sort by priority score descending\nscored.sort((a, b) => b.json.priority_score - a.json.priority_score);\n\nconsole.log(`Total keywords with scores: ${scored.length}`);\n\nreturn scored;"
+      },
+      "id": "d7400877-89f5-4348-a1f9-80764e77cb32",
+      "name": "Calculate Priority",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.sheets[0].properties.sheetId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "keyword",
+              "displayName": "keyword",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cluster",
+              "displayName": "cluster",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "search_volume",
+              "displayName": "search_volume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "keyword_difficulty",
+              "displayName": "keyword_difficulty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source_type",
+              "displayName": "source_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "competition",
+              "displayName": "competition",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cpc",
+              "displayName": "cpc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b68ca060-133e-4964-87cf-5e972102ad04",
+      "name": "Write All Keywords",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3344,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate summary data for additional tabs\nconst allKeywords = $('Calculate Priority').all();\n\n// Top by Pillar (top 15 per pillar)\nconst pillars = {};\nallKeywords.forEach(item => {\n  const pillar = item.json.pillar;\n  if (!pillars[pillar]) pillars[pillar] = [];\n  pillars[pillar].push(item.json);\n});\n\nconst topByPillar = [];\nObject.keys(pillars).forEach(pillar => {\n  pillars[pillar]\n    .sort((a, b) => b.priority_score - a.priority_score)\n    .slice(0, 15)\n    .forEach(kw => topByPillar.push(kw));\n});\n\n// Quick Wins (high volume, low/medium KD)\nconst quickWins = allKeywords\n  .filter(item => {\n    const vol = item.json.search_volume;\n    const kd = item.json.keyword_difficulty;\n    return vol >= 500 && kd <= 40;\n  })\n  .map(item => item.json)\n  .slice(0, 50);\n\n// Content Map\nconst contentMap = [];\nObject.keys(pillars).forEach(pillar => {\n  const clusters = {};\n  pillars[pillar].forEach(kw => {\n    const cluster = kw.cluster;\n    if (!clusters[cluster]) {\n      clusters[cluster] = {\n        pillar,\n        cluster,\n        keyword_count: 0,\n        avg_volume: 0,\n        suggested_page_type: ''\n      };\n    }\n    clusters[cluster].keyword_count++;\n    clusters[cluster].avg_volume += kw.search_volume;\n  });\n  \n  Object.values(clusters).forEach(cl => {\n    cl.avg_volume = Math.round(cl.avg_volume / cl.keyword_count);\n    cl.suggested_page_type = cl.keyword_count > 10 ? 'Hub Page' : 'Single Article';\n    contentMap.push(cl);\n  });\n});\n\nreturn [{\n  json: {\n    topByPillar,\n    quickWins,\n    contentMap,\n    spreadsheetId: $('Write All Keywords').first().json.spreadsheetId,\n    spreadsheetUrl: $('Write All Keywords').first().json.spreadsheetUrl\n  }\n}];"
+      },
+      "id": "9ca9a799-be82-47b3-ac87-4626d7cdb528",
+      "name": "Generate Summary Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.sheets[1].properties.sheetId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "keyword",
+              "displayName": "keyword",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cluster",
+              "displayName": "cluster",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "search_volume",
+              "displayName": "search_volume",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "keyword_difficulty",
+              "displayName": "keyword_difficulty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "source_type",
+              "displayName": "source_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "competition",
+              "displayName": "competition",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cpc",
+              "displayName": "cpc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "priority_score",
+              "displayName": "priority_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "1bb98bda-5a5d-48eb-a671-f3b90a9e9c04",
+      "name": "Write Top by Pillar",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4016,
+        -192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.sheets[2].properties.sheetId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c00aaaa7-b853-4ca1-ad51-41d247305092",
+      "name": "Write Quick Wins",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4016,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.sheets[3].properties.sheetId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8a580092-b9a0-412c-98f4-bd0aabd262d2",
+      "name": "Write Content Map",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4016,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').first().json.body['Recipient Email'] }}",
+        "subject": "={{ \"SEO Keyword Research Complete - \" + $('Webhook').first().json.body['Website URL'] }}",
+        "message": "=<h2>🎯 SEO Keyword Research Report Ready</h2>\n\n<p>Your comprehensive keyword research for <strong>{{ $('Webhook').first().json.body['Website URL'] }}</strong> is complete!</p>\n\n<h3>📈 Top 5 Keywords by Priority:</h3>\n<ol>\n{{ $('Combine Keywords for Email').first().json.keywords\n  .slice(0, 5)\n  .map(item => `<li><strong>${item.keyword}</strong> - Vol: ${item.search_volume} | KD: ${item.keyword_difficulty} | Score: ${item.priority_score}</li>`)\n  .join('\\n') }}\n</ol>\n\n<h3>📋 What's Included:</h3>\n<ul>\n  <li>✅ All Keywords (with metrics, intent, categorization)</li>\n  <li>✅ Top Keywords by Pillar</li>\n  <li>✅ Quick Wins (high volume, low difficulty)</li>\n  <li>✅ Content Map (pillar → cluster strategy)</li>\n</ul>\n\n<h3>📄 Access Your Full Report</h3>\n<p>Your complete keyword dataset has been compiled into a Google Sheet for easy access and collaboration. You can view it here:</p>\n\n<p>\n  <a href=\"{{ $('Create spreadsheet').first().json.spreadsheetUrl }}\" target=\"_blank\" style=\"\n    display: inline-block;\n    padding: 10px 18px;\n    background-color: #1a73e8;\n    color: #fff;\n    text-decoration: none;\n    border-radius: 6px;\n    font-weight: 600;\n  \">\n    🔗 View Google Sheet Report\n  </a>\n</p>\n\n<hr>\n<p><small>Generated automatically by n8n SEO Workflow</small></p>\n",
+        "options": {}
+      },
+      "id": "3398446e-d397-430f-8967-f87fbbb5338f",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3568,
+        192
+      ],
+      "webhookId": "ee2afe75-561d-48a8-b07e-cd55482b675b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "5HiwL6s4QO4OXwdt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst cleaned = [];\nconst seen = new Set();\n\nfor (const item of items) {\n  let keyword = item.json.keyword?.toString().trim() || '';\n  \n  // Remove unwanted characters: keep Unicode letters, numbers, spaces, hyphens, and apostrophes\n  keyword = keyword.replace(/[^\\p{L}\\p{N}\\s'-]/gu, '').replace(/\\s+/g, ' ').trim();\n  \n  // Skip if empty or too long\n  if (!keyword || keyword.length > 45) continue;\n  \n  // Skip duplicates\n  if (seen.has(keyword)) continue;\n  seen.add(keyword);\n  \n  cleaned.push({ keyword, source: item.json.source || 'seed' });\n}\n\n// Create array of keyword strings\nconst keywordList = cleaned.map(i => i.keyword);\n\n// Return a single JSON object containing both\nreturn [\n  {\n    json: {\n      cleaned,\n      keywords: keywordList,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        96
+      ],
+      "id": "7ce1900c-c647-4a44-a3a1-2f7bc0cab299",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first()?.json?.topByPillar;\n\nif (!Array.isArray(data) || data.length === 0) {\n  console.log(\"⚠️ No TopByPillar data found or it's empty.\");\n  return [];\n}\n\nreturn data.map(item => ({ json: item }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3792,
+        -192
+      ],
+      "id": "f339a197-afea-45ef-be52-d81cddc134e7",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first()?.json?.quickWins;\n\nif (!Array.isArray(data) || data.length === 0) {\n  console.log(\"⚠️ No QuickWins data found or it's empty.\");\n  return [];\n}\n\nreturn data.map(item => ({ json: item }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3792,
+        0
+      ],
+      "id": "513ebb84-6eeb-4c2a-a763-2fb89a400af9",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first()?.json?.contentMap;\n\nif (!Array.isArray(data) || data.length === 0) {\n  console.log(\"⚠️ No ContentMap data found or it's empty.\");\n  return [];\n}\n\nreturn data.map(item => ({ json: item }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3792,
+        192
+      ],
+      "id": "fc10f451-862c-4ba0-be19-e42a886ccf4c",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine all keyword data into one item for the email\nreturn [{\n  json: {\n    keywords: $input.all().map(item => item.json)\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        192
+      ],
+      "id": "d6bb2f03-1243-43c8-b001-61679a29f7ad",
+      "name": "Combine Keywords for Email"
+    },
+    {
+      "parameters": {
+        "resource": "spreadsheet",
+        "title": "=KEYWORDS - {{ $json.body['Website URL'] }} - {{ $json.body.user_date_time }}",
+        "sheetsUi": {
+          "sheetValues": [
+            {
+              "title": "Keywords"
+            },
+            {
+              "title": "Top by Pillar"
+            },
+            {
+              "title": "Quick Wins"
+            },
+            {
+              "title": "Content Map"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -624,
+        96
+      ],
+      "id": "9482c909-8e4d-4b80-ac3e-898bb4a2a9c6",
+      "name": "Create spreadsheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gmkpBacdXvBQWeFT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appoNkuCsLJojYsqJ",
+          "mode": "list",
+          "cachedResultName": "Snapwise Playbook Management",
+          "cachedResultUrl": "https://airtable.com/appoNkuCsLJojYsqJ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblkKtAmiUkxgbbCF",
+          "mode": "list",
+          "cachedResultName": "runs",
+          "cachedResultUrl": "https://airtable.com/appoNkuCsLJojYsqJ/tblkKtAmiUkxgbbCF"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "playbook_id": "={{ $json.execution_id }}",
+            "playbook_name": "SEO Website Review",
+            "sender_email": "={{ $('Webhook Trigger').item.json.body.user_email }}",
+            "sender_name": "={{ $('Webhook1').item.json.body.user_name }}",
+            "plan_tier": "={{ $('Webhook1').item.json.body.user_plan.label }}",
+            "client_name": "={{ $('Webhook1').item.json.body.user_name }}",
+            "status": "Running",
+            "date": "={{ $('Webhook1').item.json.body.user_date_time }}",
+            "start_date": "={{ $('Webhook1').item.json.body.user_date_time }}",
+            "job_id": "={{ $json.execution_id }}",
+            "user_credits": "={{ $('Webhook1').item.json.body.user_credits }}",
+            "Website": "={{ $('Webhook1').item.json.body.website }}",
+            "user_softr_id": "={{ $('Webhook1').item.json.body.user_plan.id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "playbook_id",
+              "displayName": "playbook_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "playbook_name",
+              "displayName": "playbook_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Competitor Analysis",
+                  "value": "Competitor Analysis"
+                },
+                {
+                  "name": "Keyword Research (Data-Driven)",
+                  "value": "Keyword Research (Data-Driven)"
+                },
+                {
+                  "name": "Pricing Page Optimizer",
+                  "value": "Pricing Page Optimizer"
+                },
+                {
+                  "name": "Email Sequence (Nurture)",
+                  "value": "Email Sequence (Nurture)"
+                },
+                {
+                  "name": "Ad Creative Concepts",
+                  "value": "Ad Creative Concepts"
+                },
+                {
+                  "name": "Market/Problem Validation",
+                  "value": "Market/Problem Validation"
+                },
+                {
+                  "name": "PR Angle Finder",
+                  "value": "PR Angle Finder"
+                },
+                {
+                  "name": "Content Architecture (Site Map)",
+                  "value": "Content Architecture (Site Map)"
+                },
+                {
+                  "name": "SEO Website Review",
+                  "value": "SEO Website Review"
+                },
+                {
+                  "name": "Content Brief Generator",
+                  "value": "Content Brief Generator"
+                },
+                {
+                  "name": "Editorial Calendar",
+                  "value": "Editorial Calendar"
+                },
+                {
+                  "name": "Landing Page Wireframe",
+                  "value": "Landing Page Wireframe"
+                },
+                {
+                  "name": "ICP Builder",
+                  "value": "ICP Builder"
+                },
+                {
+                  "name": "Social Content Factory",
+                  "value": "Social Content Factory"
+                },
+                {
+                  "name": "Weekly Performance Snapshot",
+                  "value": "Weekly Performance Snapshot"
+                },
+                {
+                  "name": "Positioning & Messaging",
+                  "value": "Positioning & Messaging"
+                },
+                {
+                  "name": "Customer Journey & JTBD",
+                  "value": "Customer Journey & JTBD"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sender_email",
+              "displayName": "sender_email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sender_name",
+              "displayName": "sender_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "plan_tier",
+              "displayName": "plan_tier",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Starter",
+                  "value": "Starter"
+                },
+                {
+                  "name": "Pro",
+                  "value": "Pro"
+                },
+                {
+                  "name": "Growth",
+                  "value": "Growth"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "client_name",
+              "displayName": "client_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Succeeded",
+                  "value": "Succeeded"
+                },
+                {
+                  "name": "Running",
+                  "value": "Running"
+                },
+                {
+                  "name": "Failed",
+                  "value": "Failed"
+                },
+                {
+                  "name": "Pending",
+                  "value": "Pending"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_date",
+              "displayName": "start_date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "end_date",
+              "displayName": "end_date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "html",
+              "displayName": "html",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "playbook_text",
+              "displayName": "playbook_text",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "json",
+              "displayName": "json",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_credits",
+              "displayName": "user_credits",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "user_softr_id",
+              "displayName": "user_softr_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pdf",
+              "displayName": "pdf",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        -816,
+        416
+      ],
+      "id": "b35f08a5-7773-4c46-a205-c6dfa66f9099",
+      "name": "Create a record",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "xPvoMpNGEftcMUoZ",
+          "name": "Airtable Personal Access Token account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8a97ad8e-cba9-4383-b560-7092480e754b",
+              "name": "=execution_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1072,
+        416
+      ],
+      "id": "bae26d81-7145-46eb-90f1-96fb21ecc8a7",
+      "name": "Edit Fields12",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "a96cf795-a5de-463d-9197-9492834194c2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1296,
+        128
+      ],
+      "id": "693432fa-3ba1-48cc-a296-dc0078ee21c1",
+      "name": "Webhook",
+      "webhookId": "a96cf795-a5de-463d-9197-9492834194c2"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').first().json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1aOUE-p9W-MHKHUWYmYUped6nBJxn5Irp",
+          "mode": "list",
+          "cachedResultName": "Keywords",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1aOUE-p9W-MHKHUWYmYUped6nBJxn5Irp"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3760,
+        416
+      ],
+      "id": "6eed928d-bbb2-4648-a569-d57dc771b7f8",
+      "name": "Move file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "iz8Op7e51wGo9ICt",
+          "name": "Google Drive account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Fetch Homepage": {
+      "main": [
+        [
+          {
+            "node": "Extract Key Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Key Pages": {
+      "main": [
+        [
+          {
+            "node": "Crawl Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crawl Pages": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Content": {
+      "main": [
+        [
+          {
+            "node": "Analyze Content with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Content with AI": {
+      "main": [
+        [
+          {
+            "node": "Generate Seed Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Analysis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Content with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Seed Keywords": {
+      "main": [
+        [
+          {
+            "node": "Parse Seed Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Seeds": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Seed Keywords",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Seed Keywords": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate Keywords": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Volume & Difficulty": {
+      "main": [
+        [
+          {
+            "node": "Parse Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Metrics": {
+      "main": [
+        [
+          {
+            "node": "Filter Zero Volume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Zero Volume": {
+      "main": [
+        [
+          {
+            "node": "Categorize with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorize with AI": {
+      "main": [
+        [
+          {
+            "node": "Merge Categorization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Categorize": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Categorize with AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Categorization": {
+      "main": [
+        [
+          {
+            "node": "Calculate Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Priority": {
+      "main": [
+        [
+          {
+            "node": "Write All Keywords",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combine Keywords for Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write All Keywords": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Summary Data": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Top by Pillar": {
+      "main": [
+        []
+      ]
+    },
+    "Write Quick Wins": {
+      "main": [
+        []
+      ]
+    },
+    "Write Content Map": {
+      "main": [
+        []
+      ]
+    },
+    "Send Email Report": {
+      "main": [
+        [
+          {
+            "node": "Move file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get Volume & Difficulty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Write Top by Pillar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Write Quick Wins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Write Content Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Keywords for Email": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Fetch Homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a record": {
+      "main": [
+        [
+          {
+            "node": "Create spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields12": {
+      "main": [
+        [
+          {
+            "node": "Create a record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Webhook": [
+      {
+        "headers": {
+          "host": "snapwise.app.n8n.cloud",
+          "user-agent": "Apache-HttpClient/4.5.13 (Java/21.0.8)",
+          "content-length": "382",
+          "accept": "application/json, application/*+json",
+          "accept-encoding": "gzip, br",
+          "cdn-loop": "cloudflare; loops=1; subreqs=1",
+          "cf-connecting-ip": "63.179.189.15",
+          "cf-ew-via": "15",
+          "cf-ipcountry": "DE",
+          "cf-ray": "9951578cb093dc79-FRA",
+          "cf-visitor": "{\"scheme\":\"https\"}",
+          "cf-worker": "n8n.cloud",
+          "content-type": "application/json",
+          "x-forwarded-for": "63.179.189.15, 172.71.144.171",
+          "x-forwarded-host": "snapwise.app.n8n.cloud",
+          "x-forwarded-port": "443",
+          "x-forwarded-proto": "https",
+          "x-forwarded-server": "traefik-prod-users-gwc-56-6f4b847c49-k42np",
+          "x-is-trusted": "yes",
+          "x-real-ip": "63.179.189.15"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+          "Website URL": "https://www.moshetabo.co.il/",
+          "user_email": "sharon@sciammas.com",
+          "user_date_time": "2025-10-27 09:59:40",
+          "user_plan": {
+            "id": "1bcca52e-08bb-44fd-9d94-0af7463fa8c5",
+            "label": "Growth"
+          },
+          "user_credits": 100,
+          "user_name": "Sharon",
+          "Recipient Email": "sharon.spirit@gmail.com",
+          "Location": "Israel",
+          "PAGE_AND_SECTION": "https://app.snapwise.marketing/keywords-research-hebrew#form1"
+        },
+        "webhookUrl": "https://snapwise.app.n8n.cloud/webhook/a96cf795-a5de-463d-9197-9492834194c2",
+        "executionMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "990cf39bc72894fdfba1bec571ac4de701a6a917ba24144e349501794c9430e4"
+  }
+}
